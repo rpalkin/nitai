@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package api.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "ai-reviewer/gen/api/v1;apiv1";
+
+message Repository {
+  string id = 1;
+  string provider_id = 2;
+  string remote_id = 3;
+  string name = 4;
+  string full_path = 5;
+  bool review_enabled = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message ListReposRequest {
+  string provider_id = 1;
+}
+
+message ListReposResponse {
+  repeated Repository repositories = 1;
+}
+
+message EnableReviewRequest {
+  string repo_id = 1;
+}
+
+message EnableReviewResponse {
+  Repository repository = 1;
+}
+
+message DisableReviewRequest {
+  string repo_id = 1;
+}
+
+message DisableReviewResponse {
+  Repository repository = 1;
+}
+
+service RepoService {
+  rpc ListRepos(ListReposRequest) returns (ListReposResponse);
+  rpc EnableReview(EnableReviewRequest) returns (EnableReviewResponse);
+  rpc DisableReview(DisableReviewRequest) returns (DisableReviewResponse);
+}

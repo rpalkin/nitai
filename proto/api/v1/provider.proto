@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package api.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "ai-reviewer/gen/api/v1;apiv1";
+
+enum ProviderType {
+  PROVIDER_TYPE_UNSPECIFIED = 0;
+  PROVIDER_TYPE_GITLAB_SELF_HOSTED = 1;
+  PROVIDER_TYPE_GITLAB_CLOUD = 2;
+  PROVIDER_TYPE_GITHUB = 3;
+}
+
+message Provider {
+  string id = 1;
+  ProviderType type = 2;
+  string name = 3;
+  string base_url = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message CreateProviderRequest {
+  ProviderType type = 1;
+  string name = 2;
+  string base_url = 3;
+  string token = 4;
+}
+
+message CreateProviderResponse {
+  Provider provider = 1;
+  string webhook_secret = 2;
+}
+
+message ListProvidersRequest {}
+
+message ListProvidersResponse {
+  repeated Provider providers = 1;
+}
+
+message DeleteProviderRequest {
+  string id = 1;
+}
+
+message DeleteProviderResponse {}
+
+service ProviderService {
+  rpc CreateProvider(CreateProviderRequest) returns (CreateProviderResponse);
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+  rpc DeleteProvider(DeleteProviderRequest) returns (DeleteProviderResponse);
+}

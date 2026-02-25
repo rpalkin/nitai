@@ -1,0 +1,17 @@
+[project]
+name = "indexer"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "qdrant-client>=1.9.0",
+    "llama-index-core>=0.10.0",
+    "llama-index-vector-stores-qdrant>=0.2.0",
+    "llama-index-embeddings-openai>=0.1.0",
+    "fastembed>=0.3.0",
+    "tree-sitter-language-pack>=0.13.0",
+    "click>=8.1.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["main", "splitter"]

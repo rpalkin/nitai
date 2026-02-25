@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Qdrant local data
+db/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+**/.env
+deploy/overlays/local/secret.env
+
+# direnv — local shell environment loader
+.envrc
+
+# Generated protobuf Go code
+gen/go/
+
+# PostgreSQL data volume
+pgdata/
+
+# Restate local state
+restate-data/

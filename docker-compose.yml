@@ -1,0 +1,166 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./db:/qdrant/storage
+
+  search-mcp:
+    build: ./search-mcp
+    depends_on:
+      - qdrant
+    ports:
+      - "8081:8080"
+    env_file: .env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8080"
+
+  indexer:
+    build: ./indexer
+    depends_on:
+      - qdrant
+    env_file: .env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ${REPO_PATH:-.}:/repo:ro
+    profiles:
+      - indexer
+    entrypoint: ["python", "main.py"]
+    command: ["/repo"]
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    env_file: .env
+    environment:
+      POSTGRES_DB: ai_reviewer
+      POSTGRES_USER: ai_reviewer
+      POSTGRES_PASSWORD: ai_reviewer
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_reviewer -d ai_reviewer"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate:v4.17.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./api-server/migrations:/migrations:ro
+    command:
+      ["-path=/migrations", "-database=postgres://ai_reviewer:ai_reviewer@postgres:5432/ai_reviewer?sslmode=disable", "up"]
+    profiles:
+      - migrate
+
+  restate:
+    image: docker.io/restatedev/restate:1.6
+    ports:
+      - "8080:8080"   # ingress
+      - "9070:9070"   # admin API
+      - "9071:9071"   # UI
+    volumes:
+      - ./restate-data:/restate-data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9070/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  restate-register:
+    image: curlimages/curl:latest
+    restart: "no"
+    depends_on:
+      restate:
+        condition: service_healthy
+      worker:
+        condition: service_started
+      reviewer:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        RESTATE_ADMIN=http://restate:9070
+        echo "==> Registering worker deployment..."
+        for i in $(seq 1 30); do
+          if curl -sf -X POST "$$RESTATE_ADMIN/deployments" \
+              -H 'content-type: application/json' \
+              -d '{"uri": "http://worker:9080"}'; then
+            echo ""
+            echo "    worker registered"
+            break
+          fi
+          [ $$i -eq 30 ] && { echo "ERROR: worker registration timed out"; exit 1; }
+          sleep 2
+        done
+        echo "==> Registering reviewer deployment..."
+        for i in $(seq 1 30); do
+          if curl -sf -X POST "$$RESTATE_ADMIN/deployments" \
+              -H 'content-type: application/json' \
+              -d '{"uri": "http://reviewer:9090"}'; then
+            echo ""
+            echo "    reviewer registered"
+            break
+          fi
+          [ $$i -eq 30 ] && { echo "ERROR: reviewer registration timed out"; exit 1; }
+          sleep 2
+        done
+        echo "==> Registration complete"
+
+  worker:
+    build:
+      context: .
+      dockerfile: go-services/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      restate:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://ai_reviewer:ai_reviewer@postgres:5432/ai_reviewer?sslmode=disable
+      WORKER_ADDR: ":9080"
+    expose:
+      - "9080"
+
+  reviewer:
+    build: ./reviewer
+    depends_on:
+      restate:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      REVIEWER_HOST: "0.0.0.0"
+      REVIEWER_PORT: "9090"
+    expose:
+      - "9090"
+
+  api-server:
+    build:
+      context: .
+      dockerfile: api-server/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      restate:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://ai_reviewer:ai_reviewer@postgres:5432/ai_reviewer?sslmode=disable
+      LISTEN_ADDR: ":8090"
+      RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_ADMIN_URL: http://restate:9070
+    ports:
+      - "8090:8090"

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `ai-reviewer` is a self-hosted AI-powered PR review system that posts summary and inline review comments on merge requests. It uses Restate for durable workflow orchestration, Pydantic AI for LLM-based review, and Qdrant for semantic code search.
 
-**Current status:** Phase 1 (MVP) complete — diff-only GitLab reviewer with manual API trigger. See `specs/phases.md` for the full roadmap and `specs/later.md` for known issues and deferred items.
+**Current status:** Phase 1 (MVP) complete. Phase 2 (Semantic Search & Context-Aware Review) in progress — subphases 2.1–2.4 done (webhooks, dispatch, debounce, draft tracking). See `specs/phases.md` for the full roadmap, `specs/phase2-plan.md` for current phase details, and `specs/later.md` for known issues and deferred items.
 
 Full technical design: `specs/overview.md`
 
@@ -61,10 +61,13 @@ GITLAB_MR_IID=42 \
 GITLAB_PROJECT_REMOTE_ID=123 \
 make e2e
 
-# Run unit tests (Go modules + Python)
+# Run unit tests (Go: go test in api-server + go-services)
 make unit
 
-# Generate protobuf code
+# Run full unit test suite with vet, build, and compile checks (go-services only)
+./tests/unit.sh
+
+# Generate protobuf code (gen/go/ is gitignored — must run before first build)
 make proto
 
 # Index a repository (one-shot, runs and exits)
@@ -102,15 +105,35 @@ curl http://localhost:9070/services | jq '.services[].name'
 ### Service Topology
 
 ```
-Admin API (curl/Postman) → API Server (:8080, ConnectRPC)
-                                │
-                                ├── PostgreSQL (:5432)
-                                │
-                                └── Restate (:8080 ingress, :9070 admin, :9071 UI)
-                                        │
-                                        ├── Go Worker (:9080) — DiffFetcher, PostReview, PRReview
-                                        └── Python Reviewer (:9090) — Reviewer
+GitLab Webhook ──┐
+                 ▼
+Admin API ──→ API Server (:8090 host, ConnectRPC)
+                    │
+                    ├── PostgreSQL (:5432)
+                    │
+                    └── Restate (:8080 ingress, :9070 admin, :9071 UI)
+                            │
+                            ├── Go Worker (:9080) — DiffFetcher, PostReview, PRReview
+                            └── Python Reviewer (:9090) — Reviewer
+                                                            Qdrant (:6333 REST, :6334 gRPC)
+                                                                ▲
+                                                        Indexer / Search-MCP (:8081 host)
 ```
+
+### Ports
+
+| Service | Container port | Host port |
+|---|---|---|
+| API Server | 8090 | 8090 |
+| Restate ingress | 8080 | 8080 |
+| Restate admin | 9070 | 9070 |
+| Restate UI | 9071 | 9071 |
+| PostgreSQL | 5432 | 5432 |
+| Qdrant REST | 6333 | 6333 |
+| Qdrant gRPC | 6334 | 6334 |
+| Search-MCP | 8080 | 8081 |
+| Worker | 9080 | (internal only) |
+| Reviewer | 9090 | (internal only) |
 
 ### Infrastructure
 
@@ -121,7 +144,9 @@ Admin API (curl/Postman) → API Server (:8080, ConnectRPC)
 
 ### Go Multi-Module Setup
 
-Three Go modules: `api-server/`, `go-services/`, `gen/go/`. Both `api-server` and `go-services` import `gen/go` via a `replace` directive. The `crypto/` and `provider/` packages are duplicated between `api-server` and `go-services` — keep them in sync.
+Three Go modules: `api-server/`, `go-services/`, `gen/go/`, linked by a `go.work` workspace at the root. Both `api-server` and `go-services` import `gen/go` via a `replace` directive. The `crypto/` and `provider/` packages are duplicated between `api-server` and `go-services` — keep them in sync.
+
+`gen/go/` is gitignored — run `make proto` to generate it before building.
 
 ### Embedding
 

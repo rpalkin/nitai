@@ -1,4 +1,8 @@
-# indexer — CLAUDE.md
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Overview
 
 Python CLI tool that indexes Git repositories into a Qdrant vector database for semantic search. Part of the larger `ai-reviewer` project. Uses OpenRouter API for OpenAI-compatible embeddings and LlamaIndex for chunking/indexing.
 

@@ -5,14 +5,22 @@ Go Restate service handlers that orchestrate the PR review pipeline. Registers t
 ## Commands
 
 ```bash
-# Build
-cd go-services && go build ./cmd/worker
+# IMPORTANT: gen/go/ is gitignored — run `make proto` from repo root before first build
 
-# Run tests (includes GitLab client unit tests)
-cd go-services && go vet ./... && go test ./...
+# Build
+go build ./cmd/worker
+
+# Run all tests with vet + build checks (preferred)
+../tests/unit.sh
+
+# Run tests directly
+go vet ./... && go test ./...
+
+# Run a single test
+go test ./internal/provider/gitlab/ -run TestGetMRDiff
 
 # Run integration tests against real GitLab (requires env vars)
-cd go-services && GITLAB_URL=... GITLAB_TOKEN=... go test -tags=integration ./internal/provider/gitlab/
+GITLAB_URL=... GITLAB_TOKEN=... go test -tags=integration ./internal/provider/gitlab/
 
 # Run via Docker (from repo root)
 docker compose up worker
@@ -36,16 +44,16 @@ docker compose up worker
 |---|---|---|---|
 | `DiffFetcher` | Service | `FetchPRDetails` | Fetches MR diff + metadata from GitLab. Reads provider credentials from DB (not passed in request). |
 | `PostReview` | Service | `Post` | Posts summary comment + inline comments to GitLab MR. Idempotent via `provider_comment_id` check. |
-| `PRReview` | Virtual Object | `Run` (exclusive) | Orchestrates the full pipeline: create run → fetch diff → call Reviewer → store results → post comments. Keyed by `<repo_id>-<mr_number>`. |
+| `PRReview` | Virtual Object | `Run` (exclusive) | Orchestrates the full pipeline: debounce → fetch details → dedup → draft guard → fetch diff → call Reviewer → store results → post comments. Keyed by `<repo_id>-<mr_number>`. |
 
 ### Internal Packages
 
 - **`config/`** — env var loading
 - **`crypto/`** — AES-256-GCM encrypt/decrypt (copy of `api-server/internal/crypto/`, keep in sync)
-- **`db/`** — pgx pool wrapper + 7 hand-written query functions in `queries.go`
-- **`difffetcher/`** — `DiffFetcher` Restate service. Decrypts provider token, fetches diff via GitLab client.
+- **`db/`** — pgx pool wrapper + 9 hand-written query functions in `queries.go`
+- **`difffetcher/`** — `DiffFetcher` Restate service. Decrypts provider token, fetches MR details + diff via GitLab client. Also handles diff-hash dedup (compares HeadSHA against latest completed review).
 - **`postreview/`** — `PostReview` Restate service. Posts summary + inline comments, updates DB with `provider_comment_id`.
-- **`prreview/`** — `PRReview` Virtual Object. Orchestrator calling DiffFetcher → Reviewer (Python, cross-language) → PostReview.
+- **`prreview/`** — `PRReview` Virtual Object. Orchestrator: smart debounce → DiffFetcher (details + dedup) → draft guard → DiffFetcher (diff) → Reviewer (Python, cross-language) → PostReview. Uses Virtual Object state for debounce timing.
 - **`provider/`** — `GitProvider` interface + GitLab REST API v4 implementation (hand-rolled HTTP, no go-gitlab library)
   - `provider.go` — interface definition + sentinel errors (`ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`, `ErrRateLimited`)
   - `gitlab/gitlab.go` — implementation: `ListRepos`, `GetMRDiff`, `GetMRDetails`, `PostComment`, `PostInlineComment`
@@ -61,3 +69,9 @@ docker compose up worker
 - **DiffFetcher reads credentials from DB** — encrypted token bytes stay out of Restate's durable journal
 - **No retries in provider layer** — Restate handles all retry logic
 - **`newProvider()` and `classifyProviderError()` duplicated** in difffetcher and postreview (~10 lines each, acceptable at this scale)
+- **Smart debounce** — `PRReview.Run` uses Virtual Object state (`last_started_at`) to debounce: only sleeps 3 minutes when a previous invocation started recently. First webhook trigger proceeds immediately with zero delay.
+- **HeadSHA as diff hash** — uses `details.HeadSHA` (git commit SHA) directly instead of SHA-256 of the diff content. Enables early exit without fetching the full diff: `GetMRDetails` is called before `GetMRDiff`.
+- **Force flag** — `PRReviewRequest.Force` propagates to `FetchRequest.Force`. API-triggered reviews (`TriggerReview`) set `Force: true` (always run); webhook-triggered reviews leave it `false` (dedup enabled).
+- **Diff-hash dedup** — if `HeadSHA` matches the latest completed review for the same repo+MR and `Force == false`, the run is marked `skipped` and exits early.
+- **Draft guard** — `FetchResponse.Draft` (from `MRDetails.Draft`) is checked after fetch. If MR is still a draft, run is marked `draft` and exits early. Handles the race where MR was marked draft between webhook receipt and review execution.
+- **Review statuses** — `review_status` enum: `pending`, `running`, `completed`, `failed`, `skipped` (dedup match), `draft` (MR is a draft)

@@ -1,4 +1,6 @@
-# reviewer — CLAUDE.md
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 Python Restate service that performs LLM-based code review. Receives a diff + MR metadata via Restate, runs a Pydantic AI agent, and returns structured review output (summary + inline comments).
 
@@ -8,17 +10,20 @@ Python Restate service that performs LLM-based code review. Receives a diff + MR
 # Install dependencies (Python >=3.12)
 pip install -e .
 
-# Run locally
+# Run locally (requires OPENROUTER_API_KEY in env)
 python -m reviewer.service
 
 # Run via Docker (from repo root)
 docker compose up reviewer
 ```
 
+No tests exist yet. No linter/formatter is configured.
+
 ## Environment Variables
 
 - `OPENROUTER_API_KEY` — API key for OpenRouter (required)
 - `REVIEW_MODEL` — OpenRouter model identifier (default: `anthropic/claude-sonnet-4-20250514`)
+- `MAX_TOKENS` — max output tokens for the LLM (default: `16384`)
 - `REVIEWER_HOST` — bind host (default: `0.0.0.0`)
 - `REVIEWER_PORT` — bind port (default: `9090`)
 
@@ -29,7 +34,7 @@ docker compose up reviewer
 ### Files
 
 - **`service.py`** — Restate service `Reviewer` with handler `RunReview`. Receives `ReviewRequest`, builds prompt, runs Pydantic AI agent, returns `ReviewResponse`. 4xx LLM errors are raised as `restate.TerminalError` (non-retryable). Runs on Hypercorn ASGI server.
-- **`agent.py`** — Pydantic AI `Agent` with `result_type=ReviewResponse`. Uses `OpenAIChatModel` + `OpenAIProvider` pointed at OpenRouter (`https://openrouter.ai/api/v1`). System prompt defines reviewer persona and guidelines.
+- **`agent.py`** — Pydantic AI `Agent` with `output_type=ReviewResponse`. Uses `OpenAIChatModel` + `OpenAIProvider` pointed at OpenRouter (`https://openrouter.ai/api/v1`). System prompt defines reviewer persona and guidelines.
 - **`prompt.py`** — `build_user_prompt(req)` — constructs the user prompt from MR metadata (title, description, author, branches, changed files) + full diff.
 - **`models.py`** — Pydantic models:
   - `ReviewRequest` — diff, mr_title, mr_description, mr_author, source_branch, target_branch, changed_files
@@ -39,6 +44,8 @@ docker compose up reviewer
 ### Key Design Decisions
 
 - **Pydantic AI from day 1** — structured output parsing, validation, retries handled automatically. Ready for tools (search, file reader) in Phase 2.
-- **No `openai:` prefix on model name** — agent uses explicit `OpenAIChatModel` + `OpenAIProvider`, so model name is the OpenRouter identifier directly
-- **Line ranges** — `ReviewComment` has `line_start` and `line_end` instead of a single `line`, supporting multi-line inline comments
-- **No tools in Phase 1** — search-MCP and file reader deferred to Phase 2
+- **No `openai:` prefix on model name** — agent uses explicit `OpenAIChatModel` + `OpenAIProvider`, so model name is the OpenRouter identifier directly.
+- **`openai_supports_tool_choice_required=False`** — OpenRouter doesn't support required tool choice; this profile flag disables it to avoid 400 errors.
+- **Line ranges** — `ReviewComment` has `line_start` and `line_end` instead of a single `line`, supporting multi-line inline comments.
+- **4xx → TerminalError** — LLM 4xx errors (auth, rate limit) are wrapped as `restate.TerminalError` so Restate won't retry them.
+- **No tools in Phase 1** — search-MCP and file reader deferred to Phase 2.

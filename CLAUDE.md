@@ -13,6 +13,34 @@ Full technical design: `specs/overview.md`
 ## Extra instructions
 - always use gopls lsp plugin while working with golang code
 
+## Working on the current phase
+
+When asked to "work on current phase" (or similar), follow these steps:
+
+### 1. Determine the current phase
+
+Check in this order:
+1. **Git branch name** — look for a pattern like `phase-X-Y` (e.g. `phase-2-5` → phase 2, subphase 5).
+2. **Working directory name** — if running inside a git worktree, the folder may be named `nitai-phase-X-Y`.
+3. **Ask the user** if neither of the above gives a clear result.
+
+### 2. Read the phase plan and determine status
+
+Open `specs/phaseX-plan.md` and find the relevant subphase section. Check its status marker:
+
+- **`✓ Done`** — tell the user it is already complete and stop.
+- **`🚧 In progress`** — find the current progress by reading the code and continue implementing.
+- **`🧪 In test`** — tell the user it is in test and stop (no action yet).
+- **No marker / not started** — treat it as ready to begin.
+
+### 3. Before starting work
+
+Mark the subphase as `🚧 In progress` in `specs/phaseX-plan.md`.
+
+### 4. After completing work
+
+Mark the subphase as `🧪 In test` in `specs/phaseX-plan.md`, then follow the **Completing a subphase** steps above.
+
 ## Completing a subphase
 
 When a subphase is implemented, do the following in order:

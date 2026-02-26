@@ -36,7 +36,7 @@
 ## Phase 2 — Semantic Search & Context-Aware Review
 
 - **Status:** In progress
-- **Completed:** 2.1 (Webhook Endpoint & Signature Validation), 2.2 (Webhook → Restate Dispatch), 2.3 (Debounce & Diff-Hash Dedup), 2.4 (Draft MR Tracking)
+- **Completed:** 2.1 (Webhook Endpoint & Signature Validation), 2.2 (Webhook → Restate Dispatch), 2.3 (Debounce & Diff-Hash Dedup), 2.4 (Draft MR Tracking), 2.5 (Repo Syncer Service)
 - **Notes:** See `phase2-plan.md` for detailed implementation notes and decisions.
 
 **Scope:** Webhook-driven automation, semantic search, and context-aware review. Add diff-hash dedup and draft MR handling.

@@ -134,6 +134,8 @@ services:
       WORKER_ADDR: ":9080"
     expose:
       - "9080"
+    volumes:
+      - repos:/data/repos
 
   reviewer:
     build: ./reviewer
@@ -146,6 +148,8 @@ services:
       REVIEWER_PORT: "9090"
     expose:
       - "9090"
+    volumes:
+      - repos:/data/repos
 
   api-server:
     build:
@@ -164,3 +168,6 @@ services:
       RESTATE_ADMIN_URL: http://restate:9070
     ports:
       - "8090:8090"
+
+volumes:
+  repos:

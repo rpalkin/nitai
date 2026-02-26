@@ -253,7 +253,7 @@ curl -X POST http://localhost:8090/webhooks/<provider-id> \
 
 ---
 
-## Subphase 2.5 — Repo Syncer Service
+## Subphase 2.5 — Repo Syncer Service ✓ Done
 
 **Goal:** Go Restate handler that maintains bare git clones on a shared Docker volume.
 
@@ -293,6 +293,22 @@ curl -X POST http://localhost:8090/webhooks/<provider-id> \
 # Run again: git fetch (no re-clone), fast completion
 # Verify: git --git-dir=/data/repos/<repo_id> show HEAD:README.md returns content
 ```
+
+### Implementation notes
+
+**What changed from the plan:**
+
+- **go-git instead of shell-out**: The plan mentioned `git clone --bare` and `git fetch origin` via CLI. Used `github.com/go-git/go-git/v5` (pure Go) instead — no shell-out needed, no `gc.auto=0` concern (go-git doesn't run GC automatically).
+- **`refs/heads/<branch>` not `refs/remotes/origin/<branch>`**: Bare clones via go-git store remote branches at `refs/heads/*` (mirroring the remote directly), not at `refs/remotes/origin/*`. The plan specified `refs/remotes/origin/<target_branch>` for revision resolution; implementation uses `refs/heads/<target_branch>`.
+- **Explicit RefSpecs on fetch**: go-git's bare clone configures the `origin` remote with a non-bare default refspec (`+refs/heads/*:refs/remotes/origin/*`). Added explicit `RefSpecs: []config.RefSpec{"+refs/heads/*:refs/heads/*"}` to `FetchContext` to ensure consistency between initial clone and subsequent fetches.
+- **`syncBareRepo` helper extracted**: Git sync logic extracted into a testable `syncBareRepo(ctx, repoPath, cloneURL, token)` helper separate from DB/crypto concerns.
+- **Auth not embedded in URL**: Plan mentioned embedding token in clone URL. Used `go-git`'s `http.BasicAuth{Username: "oauth2", Password: token}` passed via `CloneOptions.Auth` / `FetchOptions.Auth` — cleaner separation.
+
+**Architectural decisions:**
+
+- **`buildCloneURL` helper**: URL construction extracted to a pure function (`net/url.Parse` + `path.Join`), fully unit-tested with table-driven tests.
+- **`RepoSyncer` registered as regular Service** (not Virtual Object): stateless, no per-repo state needed in Restate. Concurrency on the same repo_id is safe — go-git clone is atomic (writes to temp dir + rename) and fetch is read-safe.
+- **Remote URL update on fetch**: If `origin` URL differs from the computed clone URL (e.g., provider base URL migrated), it's updated in the repo config before fetching.
 
 ---
 

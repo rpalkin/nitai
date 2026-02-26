@@ -15,6 +15,7 @@ import (
 	"ai-reviewer/go-services/internal/difffetcher"
 	"ai-reviewer/go-services/internal/postreview"
 	"ai-reviewer/go-services/internal/prreview"
+	"ai-reviewer/go-services/internal/reposyncer"
 )
 
 func main() {
@@ -49,12 +50,14 @@ func main() {
 	diffFetcher := difffetcher.New(pool, encKey)
 	postReviewSvc := postreview.New(pool, encKey)
 	prReviewSvc := prreview.New(pool)
+	repoSyncerSvc := reposyncer.New(pool, encKey)
 
 	log.Printf("starting worker on %s", cfg.WorkerAddr)
 	if err := server.NewRestate().
 		Bind(restate.Reflect(diffFetcher)).
 		Bind(restate.Reflect(postReviewSvc)).
 		Bind(restate.Reflect(prReviewSvc)).
+		Bind(restate.Reflect(repoSyncerSvc)).
 		Start(ctx, cfg.WorkerAddr); err != nil {
 		log.Fatalf("server error: %v", err)
 	}

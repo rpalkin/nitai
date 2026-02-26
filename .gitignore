@@ -7,7 +7,7 @@ dist/
 build/
 
 # Qdrant local data
-db/
+/db/
 
 # Environment / secrets
 .env

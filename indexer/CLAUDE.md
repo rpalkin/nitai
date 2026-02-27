@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Python CLI tool that indexes Git repositories into a Qdrant vector database for semantic search. Part of the larger `ai-reviewer` project. Uses OpenRouter API for OpenAI-compatible embeddings and LlamaIndex for chunking/indexing.
+Python Restate service that indexes Git repositories (bare clones) into a Qdrant vector database for semantic search. Part of the larger `ai-reviewer` project. Uses OpenRouter API for OpenAI-compatible embeddings and LlamaIndex for chunking/indexing.
 
 ## Commands
 
@@ -12,32 +12,47 @@ Python CLI tool that indexes Git repositories into a Qdrant vector database for 
 # Install dependencies (requires Python >=3.11)
 pip install -e .
 
-# Run directly (requires Qdrant accessible at localhost:6333)
-python main.py <git-repo-directory> [--model text-embedding-3-small] [--qdrant-url http://localhost:6333] [--recreate]
+# Run locally (requires Qdrant accessible at localhost:6333)
+python -m indexer.service
 
-# Run via Docker Compose (from repo root)
-REPO_PATH=/path/to/repo docker compose run --rm indexer
-
-# Pass extra flags
-REPO_PATH=/path/to/repo docker compose run --rm indexer /repo --recreate
+# Run via Docker (from repo root)
+docker compose up indexer
 ```
 
 ## Environment Variables
 
-Requires `OPENROUTER_API_KEY`, `EMBEDDING_MODEL`, and `QDRANT_URL` in the root `.env` file (see `.env.example`). The key is used to call OpenAI embedding models via OpenRouter.
+- `OPENROUTER_API_KEY` — API key for OpenRouter (required)
+- `EMBEDDING_MODEL` — embedding model identifier (default: `text-embedding-3-small`)
+- `QDRANT_URL` — Qdrant URL (default: `http://localhost:6333`)
+- `INDEXER_HOST` — bind host (default: `0.0.0.0`)
+- `INDEXER_PORT` — bind port (default: `9091`)
 
 ## Architecture
 
-Two modules:
+**Module:** `indexer` (Python 3.12, dependencies: `restate-sdk`, `hypercorn`, llama-index, qdrant-client, tree-sitter)
 
-- **`main.py`** — CLI entry point (Click). `path` is a positional argument (not `--path`). Walks a git repo, computes file hashes for incremental updates, connects to Qdrant, and orchestrates the index/update pipeline. `--recreate` drops and recreates the collection. Key constants: `MAX_FILE_BYTES` (500KB), `SKIP_DIRS`, `MODEL_DIMENSIONS`.
-- **`splitter.py`** — Document chunking. Uses tree-sitter `CodeSplitter` for 17 programming languages (40-line chunks, 5-line overlap, 1500 char max) and falls back to `SentenceSplitter` (512 chars, 64 overlap) for other file types.
+### Files
 
-**Indexing flow:** walk files → hash-based diff against existing Qdrant collection → remove deleted files → re-chunk changed files → embed via OpenRouter → upsert nodes with hybrid indexing.
+- **`indexer/service.py`** — Restate service `Indexer` with handler `IndexRepo`. Receives `IndexRequest`, calls `index_repo(...)`, returns `IndexResult`. Runs on Hypercorn ASGI server on port 9091.
+- **`indexer/models.py`** — Pydantic models: `IndexRequest` (repo_id, repo_path, branch, head_sha, collection_name, last_indexed_commit) and `IndexResult` (collection_name, files_indexed, chunks_upserted).
+- **`indexer/indexing.py`** — Core indexing pipeline. Handles full and incremental indexing via git bare clone operations. Returns early (no-op) if `last_indexed_commit == head_sha`.
+- **`indexer/git.py`** — Bare clone file operations: `list_files` (git ls-tree), `read_file` (git show), `hash_file_content`, `changed_files` (git diff --name-only). All use `--git-dir` flag for bare clone access.
+- **`indexer/splitter.py`** — Document chunking. Uses tree-sitter `CodeSplitter` for 17 programming languages and falls back to `SentenceSplitter` for other file types.
 
-Collection names are derived from the git remote URL via `sanitize_collection_name`.
+### Indexing Flow
+
+1. Go caller reads `branch_indexes.last_indexed_commit` from DB.
+2. If `last_indexed_commit == head_sha` → Go caller skips the Restate call entirely.
+3. Otherwise Go caller invokes `Indexer.IndexRepo` with `last_indexed_commit` (None for first-time).
+4. If `last_indexed_commit` is set → incremental diff via `git diff --name-only`.
+5. Otherwise → full index via `git ls-tree`.
+6. Files are read via `git show <sha>:<path>` on the bare clone.
+7. Files are chunked, embedded, and upserted into Qdrant.
+8. Go caller upserts `branch_indexes` row with new `head_sha`.
 
 ### Key Notes
 
-- `MODEL_DIMENSIONS` dict is duplicated in both `main.py` and `search-mcp/server.py` — keep them in sync
-- Untouched in Phase 1; will be adapted as a Restate Python service in Phase 2
+- **Stateless:** Indexer has no DB dependency. Go caller owns `branch_indexes` table access.
+- **Bare clone access:** All file reads use `git --git-dir=<repo_path> show <sha>:<path>` — no working tree required.
+- `MODEL_DIMENSIONS` dict is duplicated in both `indexer/indexing.py` and `search-mcp/server.py` — keep them in sync.
+- Collection names are passed in from the Go caller (derived from `sanitize_collection_name(f"{repo_id}_{branch}")`).

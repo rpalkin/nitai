@@ -27,3 +27,5 @@ pgdata/
 
 # Restate local state
 restate-data/
+
+/*/out/

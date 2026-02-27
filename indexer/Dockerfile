@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -7,9 +9,6 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
 # Copy source after dependencies so code changes don't bust the dep layer.
-COPY . .
+COPY indexer/ indexer/
 
-# Indexer is a one-shot CLI tool — the command is provided at runtime:
-#   kubectl run indexer --image=... -- python main.py /repo --qdrant-url http://qdrant:6333
-# or triggered via Tilt local_resource / k8s Job.
-CMD ["python", "main.py", "--help"]
+CMD ["python", "-m", "indexer.service"]

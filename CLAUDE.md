@@ -12,6 +12,7 @@ Full technical design: `specs/overview.md`
 
 ## Extra instructions
 - always use gopls lsp plugin while working with golang code
+- always build binaries into `out` folder that is put to gitignore
 
 ## Working on the current phase
 

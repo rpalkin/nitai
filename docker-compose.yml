@@ -23,16 +23,19 @@ services:
   indexer:
     build: ./indexer
     depends_on:
-      - qdrant
+      qdrant:
+        condition: service_started
+      restate:
+        condition: service_healthy
     env_file: .env
     environment:
       QDRANT_URL: http://qdrant:6333
+      INDEXER_HOST: "0.0.0.0"
+      INDEXER_PORT: "9091"
+    expose:
+      - "9091"
     volumes:
-      - ${REPO_PATH:-.}:/repo:ro
-    profiles:
-      - indexer
-    entrypoint: ["python", "main.py"]
-    command: ["/repo"]
+      - repos:/data/repos
 
   postgres:
     image: postgres:16-alpine
@@ -88,6 +91,8 @@ services:
         condition: service_started
       reviewer:
         condition: service_started
+      indexer:
+        condition: service_started
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -115,6 +120,18 @@ services:
             break
           fi
           [ $$i -eq 30 ] && { echo "ERROR: reviewer registration timed out"; exit 1; }
+          sleep 2
+        done
+        echo "==> Registering indexer deployment..."
+        for i in $(seq 1 30); do
+          if curl -sf -X POST "$$RESTATE_ADMIN/deployments" \
+              -H 'content-type: application/json' \
+              -d '{"uri": "http://indexer:9091"}'; then
+            echo ""
+            echo "    indexer registered"
+            break
+          fi
+          [ $$i -eq 30 ] && { echo "ERROR: indexer registration timed out"; exit 1; }
           sleep 2
         done
         echo "==> Registration complete"

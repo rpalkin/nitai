@@ -312,7 +312,7 @@ curl -X POST http://localhost:8090/webhooks/<provider-id> \
 
 ---
 
-## Subphase 2.6 — Indexer as Restate Service
+## Subphase 2.6 — Indexer as Restate Service 🧪 In test
 
 **Goal:** Adapt the existing indexer module as a Restate Python service handler.
 
@@ -366,6 +366,21 @@ curl http://localhost:6333/collections/<collection-name>
 # Search via search-mcp client:
 python search-mcp/client.py search <collection> "function name" --top-k 3
 ```
+
+### Implementation notes
+
+**What changed from the plan:**
+
+- **CLI removed:** The plan mentioned keeping the CLI for backwards compat. Removed `main.py` and top-level `splitter.py` entirely — all indexing goes through the Restate service now.
+- **`click` and `python-dotenv` removed:** No longer needed (CLI gone). Package deps trimmed to only what the service requires.
+- **Migration number 000008** (not 000007 as in the plan body — 000007 was used for `draft_status` in 2.4).
+- **Python 3.12 in Dockerfile:** Upgraded from 3.11-slim to 3.12-slim (matching reviewer).
+
+**Architectural decisions:**
+
+- **Stateless indexer:** Go caller owns `branch_indexes` table access. Indexer receives `last_indexed_commit` in `IndexRequest` and returns `IndexResult`. No DB connection in the Python service.
+- **Skip-if-unchanged in `index_repo()`:** Both Go caller (skips Restate call entirely) and `index_repo()` (returns no-op early) check for `last_indexed_commit == head_sha` — defense in depth.
+- **`git --git-dir` flag throughout:** All git commands in `git.py` use `--git-dir=<repo_path>` for bare clone access at `/data/repos/<repo_id>/`.
 
 ---
 

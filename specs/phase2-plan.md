@@ -561,6 +561,20 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 
 ---
 
+## E2E Test Framework (Infrastructure) ✓ Done
+
+A standalone Go e2e test module was created at `e2e/` as Phase 2 infrastructure. It provides:
+
+- Mock GitLab API server (`mock_gitlab.go`) — configurable per-MR responses, thread-safe request recording
+- Mock LLM server (`mock_llm.go`) — OpenAI-compatible, returns tool-calling format responses
+- Full-stack test harness via testcontainers-go compose (`docker-compose.e2e.yml` overlay)
+- ConnectRPC test clients and polling helpers (`helpers.go`)
+- `TestFullPipelineViaTriggerReview` as the first test case
+
+Run with `make e2e` (requires Docker). 28 planned test cases in `specs/e2e-cases.md`. See `e2e/CLAUDE.md` for details.
+
+---
+
 ## Subphase 2.11 — E2E Tests & Smoke Tests Update
 
 **Goal:** Update test scripts to cover Phase 2 functionality.

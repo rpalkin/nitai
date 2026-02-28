@@ -1,0 +1,18 @@
+services:
+  restate:
+    volumes:
+      - restate-e2e-data:/restate-data
+  reviewer:
+    environment:
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  worker:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  api-server:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  restate-e2e-data:

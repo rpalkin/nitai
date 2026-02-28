@@ -18,7 +18,10 @@ smoke:
 	./tests/smoke.sh
 
 e2e:
-	./tests/e2e.sh
+	cd e2e && \
+		DOCKER_HOST=$${DOCKER_HOST:-$$(docker context inspect --format '{{.Endpoints.docker.Host}}')} \
+		TESTCONTAINERS_RYUK_DISABLED=true \
+		GOWORK=off go test -v -tags e2e -count=1 -timeout 300s ./...
 
 unit:
 	cd go-services && go test ./...

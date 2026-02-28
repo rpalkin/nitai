@@ -62,6 +62,7 @@ Each component has its own `CLAUDE.md` with detailed architecture and commands:
 | [search-mcp](search-mcp/) | Python FastMCP server — semantic code search over Qdrant | [search-mcp/CLAUDE.md](search-mcp/CLAUDE.md) |
 | [proto](proto/) | Protobuf API definitions (provider, repo, review services) | — |
 | [gen](gen/) | Generated Go code from protobuf (shared module) | — |
+| [e2e](e2e/) | Go e2e test suite — full-stack tests with mock GitLab + LLM servers | [e2e/CLAUDE.md](e2e/CLAUDE.md) |
 
 ## Commands
 
@@ -83,12 +84,18 @@ make logs
 make smoke
 # or: ./tests/smoke.sh [--no-teardown]
 
-# Run end-to-end tests (requires GitLab env vars — skipped if not set)
+# Run e2e tests (mock mode — no external services needed, requires Docker)
+make e2e
+
+# Run e2e tests in live mode (requires a real GitLab instance)
+E2E_LIVE=1 \
 GITLAB_URL=https://gitlab.example.com \
 GITLAB_TOKEN=glpat-... \
 GITLAB_MR_IID=42 \
 GITLAB_PROJECT_REMOTE_ID=123 \
 make e2e
+
+# Note: gen/go/ is gitignored — run `make proto` before running e2e tests
 
 # Run unit tests (Go: go test in api-server + go-services)
 make unit

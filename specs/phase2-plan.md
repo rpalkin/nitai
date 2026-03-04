@@ -312,7 +312,7 @@ curl -X POST http://localhost:8090/webhooks/<provider-id> \
 
 ---
 
-## Subphase 2.6 — Indexer as Restate Service 🧪 In test
+## Subphase 2.6 — Indexer as Restate Service ✓ Done
 
 **Goal:** Adapt the existing indexer module as a Restate Python service handler.
 

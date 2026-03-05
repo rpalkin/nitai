@@ -35,13 +35,15 @@ type RunRequest struct {
 
 // reviewerInput is the payload sent to the Python Reviewer service.
 type reviewerInput struct {
-	Diff          string   `json:"diff"`
-	MRTitle       string   `json:"mr_title"`
-	MRDescription string   `json:"mr_description"`
-	MRAuthor      string   `json:"mr_author"`
-	SourceBranch  string   `json:"source_branch"`
-	TargetBranch  string   `json:"target_branch"`
-	ChangedFiles  []string `json:"changed_files"`
+	Diff            string   `json:"diff"`
+	MRTitle         string   `json:"mr_title"`
+	MRDescription   string   `json:"mr_description"`
+	MRAuthor        string   `json:"mr_author"`
+	SourceBranch    string   `json:"source_branch"`
+	TargetBranch    string   `json:"target_branch"`
+	ChangedFiles    []string `json:"changed_files"`
+	RepoPath        string   `json:"repo_path,omitempty"`
+	TargetBranchSHA string   `json:"target_branch_sha,omitempty"`
 }
 
 // reviewComment is a single inline comment from the Reviewer service.

@@ -13,6 +13,7 @@ Full technical design: `specs/overview.md`
 ## Extra instructions
 - always use gopls lsp plugin while working with golang code
 - always build binaries into `out` folder that is put to gitignore
+- when starting work on a phase, check that `.env` exists and has `ENCRYPTION_KEY` set to a non-empty value; if not, generate one with `python3 -c "import secrets; print(secrets.token_hex(32))"` and set it
 
 ## Working on the current phase
 

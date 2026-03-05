@@ -9,6 +9,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from .agent import review_agent
 from .models import ReviewRequest, ReviewResponse
 from .prompt import build_user_prompt
+from .tools import ReviewDeps
 
 reviewer_service = restate.Service("Reviewer")
 
@@ -16,7 +17,8 @@ reviewer_service = restate.Service("Reviewer")
 @reviewer_service.handler("RunReview")
 async def run_review(ctx: restate.Context, req: ReviewRequest) -> ReviewResponse:
     try:
-        result = await review_agent.run(build_user_prompt(req))
+        deps = ReviewDeps(repo_path=req.repo_path, target_branch_sha=req.target_branch_sha)
+        result = await review_agent.run(build_user_prompt(req), deps=deps)
         return result.output
     except ModelHTTPError as e:
         # 4xx errors are not recoverable by retrying — mark as terminal.

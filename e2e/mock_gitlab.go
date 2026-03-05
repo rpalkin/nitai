@@ -269,6 +269,20 @@ func (g *GitLabMock) Discussions() []PostedDiscussion {
 	return out
 }
 
+// DeleteMR removes an MR config from the mock (for reconfiguring between test steps).
+func (g *GitLabMock) DeleteMR(projectID, mrIID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.mrConfigs, projectID+"/"+mrIID)
+}
+
+// ResetMRConfigs removes all MR configs.
+func (g *GitLabMock) ResetMRConfigs() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.mrConfigs = make(map[string]*MRConfig)
+}
+
 func (g *GitLabMock) Reset() {
 	g.mu.Lock()
 	defer g.mu.Unlock()

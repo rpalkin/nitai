@@ -20,8 +20,71 @@ import (
 	apiv1 "ai-reviewer/gen/api/v1"
 	"ai-reviewer/gen/api/v1/apiv1connect"
 	"connectrpc.com/connect"
+	"github.com/jackc/pgx/v5"
 	tc "github.com/testcontainers/testcontainers-go/modules/compose"
 )
+
+const e2eDBURL = "postgres://ai_reviewer:ai_reviewer@localhost:5432/ai_reviewer?sslmode=disable"
+
+// DBReviewRun holds minimal review_run data for direct DB queries.
+type DBReviewRun struct {
+	ID       string
+	RepoID   string
+	MRNumber int64
+	Status   string
+	DiffHash string
+}
+
+// QueryReviewRuns returns all review_runs for the given (repoID, mrNumber), ordered by created_at.
+func QueryReviewRuns(t *testing.T, repoID string, mrNumber int64) []DBReviewRun {
+	t.Helper()
+	conn, err := pgx.Connect(context.Background(), e2eDBURL)
+	if err != nil {
+		t.Fatalf("QueryReviewRuns: connect: %v", err)
+	}
+	defer conn.Close(context.Background())
+
+	rows, err := conn.Query(context.Background(),
+		`SELECT id, repo_id, mr_number, status, COALESCE(diff_hash, '')
+		 FROM review_runs
+		 WHERE repo_id = $1 AND mr_number = $2
+		 ORDER BY created_at`,
+		repoID, mrNumber)
+	if err != nil {
+		t.Fatalf("QueryReviewRuns: query: %v", err)
+	}
+	defer rows.Close()
+
+	var result []DBReviewRun
+	for rows.Next() {
+		var r DBReviewRun
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.MRNumber, &r.Status, &r.DiffHash); err != nil {
+			t.Fatalf("QueryReviewRuns: scan: %v", err)
+		}
+		result = append(result, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("QueryReviewRuns: rows: %v", err)
+	}
+	return result
+}
+
+// WaitForReviewRun polls the DB every 2s until a review_run with wantStatus exists for (repoID, mrNumber).
+func WaitForReviewRun(t *testing.T, repoID string, mrNumber int64, wantStatus string, timeout time.Duration) *DBReviewRun {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		runs := QueryReviewRuns(t, repoID, mrNumber)
+		for i := range runs {
+			if runs[i].Status == wantStatus {
+				return &runs[i]
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.Fatalf("timeout waiting for review run with status=%s (repoID=%s, mr=%d)", wantStatus, repoID, mrNumber)
+	return nil
+}
 
 // testingT is a minimal interface for TestMain (which doesn't get *testing.T).
 type testingT interface {

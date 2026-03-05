@@ -4,11 +4,13 @@ All planned end-to-end test cases for ai-reviewer. Cases 1–13 were designed by
 
 Tests marked `[SKIP]` cover features not yet implemented and are included as executable specs — the test code exists with `t.Skip(...)` and should pass once the feature is built.
 
+Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (or are intentionally skipped).
+
 ---
 
 ## Cases 1–13 (Planner)
 
-### Test 1 — Full pipeline via TriggerReview ✅ green
+### Test 1 — Full pipeline via TriggerReview ✅ green [DONE]
 **Purpose:** Verify the complete happy path triggered via the admin API.
 
 **Pre-conditions:**
@@ -42,7 +44,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 2 — Full pipeline via Webhook ✅ green
+### Test 2 — Full pipeline via Webhook ✅ green [DONE]
 **Purpose:** Verify the complete happy path triggered by a simulated GitLab webhook.
 
 **Pre-conditions:** Same as Test 1 (provider registered, repo review enabled, mocks configured).
@@ -76,7 +78,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 3 — Invalid webhook secret → 401 🔴 red
+### Test 3 — Invalid webhook secret → 401 🔴 red [DONE]
 **Purpose:** Verify webhook authentication rejects bad secrets.
 
 **Steps:**
@@ -90,7 +92,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 4 — Unknown repo in webhook → no run created 🔴 red
+### Test 4 — Unknown repo in webhook → no run created 🔴 red [DONE]
 **Purpose:** Verify webhook for an unregistered repo is accepted but produces no review.
 
 **Steps:**
@@ -104,7 +106,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 5 — Draft MR → run created with draft status, no LLM call 🔴 red
+### Test 5 — Draft MR → run created with draft status, no LLM call 🔴 red [DONE]
 **Purpose:** Verify draft MRs are acknowledged but not reviewed.
 
 **Webhook payload:** `"draft": true, "work_in_progress": true`
@@ -121,7 +123,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 6 — Draft → Ready transition ✅ green
+### Test 6 — Draft → Ready transition ✅ green [DONE]
 **Purpose:** Verify that unmarking a draft MR triggers a full review.
 
 **Steps:**
@@ -137,7 +139,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 7 — Review disabled repo → no run created 🔴 red
+### Test 7 — Review disabled repo → no run created 🔴 red [DONE]
 **Purpose:** Verify webhooks for repos with review disabled produce no run.
 
 **Steps:**
@@ -151,7 +153,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 8 — Large diff short-circuit ✅ green
+### Test 8 — Large diff short-circuit ✅ green [DONE]
 **Purpose:** Verify diffs >5000 lines skip LLM and post a canned message.
 
 **Pre-conditions:** Mock GitLab returns a dynamically generated 5001-line diff (built in test setup via `strings.Builder`).
@@ -168,7 +170,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 9 — Duplicate diff dedup 🔴 red
+### Test 9 — Duplicate diff dedup 🔴 red [DONE]
 **Purpose:** Verify the same diff hash sent twice produces only one review.
 
 **Note:** This test is slow — Restate debounce timer (3 min) may apply on second invocation.
@@ -185,7 +187,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 10 — Provider deletion cascade ✅ green
+### Test 10 — Provider deletion cascade ✅ green [DONE]
 **Purpose:** Verify deleting a provider soft-deletes repos and disables future reviews.
 
 **Steps:**
@@ -200,7 +202,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 11 — LLM terminal error → review FAILED 🔴 red
+### Test 11 — LLM terminal error → review FAILED 🔴 red [DONE]
 **Purpose:** Verify LLM HTTP 400 errors result in a failed review run, not a hang.
 
 **Pre-conditions:** Mock LLM configured to return HTTP 400 for any request matching this test's diff content.
@@ -217,7 +219,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 12 — GitLab 404 for MR → review FAILED 🔴 red
+### Test 12 — GitLab 404 for MR → review FAILED 🔴 red [DONE]
 **Purpose:** Verify GitLab returning 404 on MR fetch results in a failed review.
 
 **Pre-conditions:** Mock GitLab configured to return 404 for `GET /merge_requests/:iid`.
@@ -234,7 +236,7 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 
 ---
 
-### Test 13 — Semantic search: wrong function call detected [SKIP] ⚠️ spec
+### Test 13 — Semantic search: wrong function call detected [SKIP] ⚠️ spec [DONE]
 **Purpose:** Verify the reviewer finds a function definition via semantic search when it's not in the diff, and posts a comment about the argument mismatch.
 
 **Status:** `t.Skip("semantic search not yet integrated into reviewer pipeline")` — this test is the executable spec for the feature.
@@ -526,3 +528,9 @@ Tests marked `[SKIP]` cover features not yet implemented and are included as exe
 | ✅ Green (happy path) | 16 |
 | 🔴 Red (error/negative) | 11 |
 | ⚠️ Spec / skip-marked | 1 (Test 13) |
+
+| Implementation | Count |
+|---|---|
+| [DONE] Implemented (passing) | 12 (Tests 1–12) |
+| [DONE] Implemented (t.Skip) | 1 (Test 13) |
+| Not yet implemented | 15 (Tests A–O) |

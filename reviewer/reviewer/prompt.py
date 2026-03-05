@@ -17,6 +17,11 @@ value for both if a single line is affected.
 important findings.
 - If there are no meaningful issues, return an empty `comments` list and say so in the \
 summary.
+
+Tools:
+- You have access to a `read_file` tool that reads files from the repository at the \
+target branch HEAD. Use it when the diff references functions, types, constants, or \
+configuration defined in other files. Do not read files unnecessarily.
 """
 
 

@@ -9,6 +9,8 @@ class ReviewRequest(BaseModel):
     source_branch: str
     target_branch: str
     changed_files: list[str]
+    repo_path: str | None = None
+    target_branch_sha: str | None = None
 
 
 class ReviewComment(BaseModel):

@@ -384,7 +384,7 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 
 ---
 
-## Subphase 2.7 — File Reader Tool for Reviewer
+## Subphase 2.7 — File Reader Tool for Reviewer ✓ Done
 
 **Goal:** Reviewer agent can read files at a pinned SHA from the bare clone during review.
 
@@ -424,6 +424,27 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 # Check logs: read_file tool calls visible
 # Test invalid path: ensure no error propagation to MR comment
 ```
+
+### Implementation notes
+
+**What changed from the plan:**
+
+- **`ReviewDeps` dataclass instead of plain arguments**: Pydantic AI deps pattern used — `ReviewDeps(repo_path, target_branch_sha)` injected via `Agent[ReviewDeps, ...]`. The LLM only sees `file_path`; `repo_path` and `sha` come from `ctx.deps` inside the tool.
+- **`git --git-dir` flag**: Uses `--git-dir=<repo_path>` (bare clone pattern) consistent with indexer.
+- **Error strings, not exceptions**: Tool returns human-readable error strings on failure so the LLM can adjust rather than crashing.
+
+**Architectural decisions:**
+
+- **Graceful degradation**: `repo_path` and `target_branch_sha` are optional on `ReviewRequest`. When absent, `read_file` returns "repository context not available" — reviews still complete without the tool.
+- **500KB size limit + UTF-8 binary detection**: Prevents the LLM context from being flooded by large or binary files.
+- **`go-services` struct extended with `omitempty`**: `RepoPath` and `TargetBranchSHA` added to `reviewerInput` — empty when SyncRepo is not yet wired (2.9). Fields stay zero-valued until 2.9.
+- **`asyncio.to_thread`**: `read_file` tool wraps the sync `subprocess.run` call to avoid blocking the async event loop.
+
+**Unit tests** (`reviewer/tests/test_tools.py`, 29 tests): `_validate_sha`, `_validate_file_path`, `read_file_from_repo` (success, file-not-found, timeout, git-not-found, oversized, binary), `ReviewDeps`.
+
+**E2e tests added:**
+- `A14` assertion in `TestFullPipelineViaTriggerReview`: LLM request body contains `"read_file"` tool
+- `TestReadFileToolGracefulDegradation`: LLM calls `read_file` → gets "no context" error → review still completes (2 LLM calls, second request contains tool error result)
 
 ---
 

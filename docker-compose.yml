@@ -163,6 +163,7 @@ services:
     environment:
       REVIEWER_HOST: "0.0.0.0"
       REVIEWER_PORT: "9090"
+      SEARCH_MCP_URL: http://search-mcp:8080
     expose:
       - "9090"
     volumes:

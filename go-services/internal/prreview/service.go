@@ -42,8 +42,9 @@ type reviewerInput struct {
 	SourceBranch    string   `json:"source_branch"`
 	TargetBranch    string   `json:"target_branch"`
 	ChangedFiles    []string `json:"changed_files"`
-	RepoPath        string   `json:"repo_path,omitempty"`
-	TargetBranchSHA string   `json:"target_branch_sha,omitempty"`
+	RepoPath         string   `json:"repo_path,omitempty"`
+	TargetBranchSHA  string   `json:"target_branch_sha,omitempty"`
+	SearchCollection string   `json:"search_collection,omitempty"`
 }
 
 // reviewComment is a single inline comment from the Reviewer service.

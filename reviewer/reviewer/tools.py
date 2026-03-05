@@ -1,13 +1,20 @@
+import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass
+
+from fastmcp import Client
 
 
 @dataclass
 class ReviewDeps:
     repo_path: str | None
     target_branch_sha: str | None
+    search_collection: str | None = None
 
+
+SEARCH_MCP_URL = os.environ.get("SEARCH_MCP_URL", "http://search-mcp:8080")
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _MAX_BYTES = 500 * 1024  # 500KB
@@ -57,3 +64,20 @@ def read_file_from_repo(repo_path: str, sha: str, file_path: str) -> str:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
         return "Error: file appears to be binary"
+
+
+async def search_mcp(url: str, collection: str, query: str, top_k: int = 5) -> list[dict] | str:
+    """Call search-mcp via fastmcp Client.
+
+    Returns a list of result dicts on success, or a human-readable error string.
+    """
+    try:
+        async with Client(f"{url}/mcp/") as client:
+            result = await client.call_tool(
+                "search",
+                {"query": query, "collection": collection, "top_k": top_k},
+            )
+            text = result[0].text if result else "[]"
+            return json.loads(text)
+    except Exception as e:
+        return f"Error: search-mcp failed: {e}"

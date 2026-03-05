@@ -249,6 +249,9 @@ func TestFullPipelineViaTriggerReview(t *testing.T) {
 		if !strings.Contains(body, "read_file") {
 			t.Errorf("LLM request missing 'read_file' tool (phase 2.7)")
 		}
+		if !strings.Contains(body, "search_codebase") {
+			t.Errorf("LLM request missing 'search_codebase' tool (phase 2.8)")
+		}
 	}
 }
 
@@ -935,6 +938,106 @@ func TestReadFileToolGracefulDegradation(t *testing.T) {
 	// Review still posted comments despite the tool error
 	if len(run.Comments) == 0 {
 		t.Errorf("expected comments in completed review after read_file error")
+	}
+}
+
+// TestSearchCodebaseToolGracefulDegradation verifies that when the LLM calls the search_codebase
+// tool but search context is not yet available (phase 2.8 — collection wired in 2.9), the tool
+// returns a human-readable error and the review still completes successfully.
+func TestSearchCodebaseToolGracefulDegradation(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1,
+            "title": "Add order processing",
+            "description": "Implements order handler",
+            "author": {"username": "alice"},
+            "source_branch": "feature/orders",
+            "target_branch": "main",
+            "sha": "bbb222",
+            "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{
+                "old_path": "src/handler.go",
+                "new_path": "src/handler.go",
+                "diff": "@@ -10,6 +10,12 @@ package handler\n import \"fmt\"\n \n+func ProcessOrder(order *Order) error {\n+    result := CalculateTotal(order.Items)\n+    if result == nil {\n+        return nil\n+    }\n+    fmt.Println(result)\n+    return nil\n+}",
+                "new_file": false, "deleted_file": false, "renamed_file": false
+            }]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1,
+            "head_commit_sha": "bbb222",
+            "base_commit_sha": "aaa111",
+            "start_commit_sha": "aaa111"
+        }]`),
+	})
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	// Two-turn conversation: first call returns search_codebase tool call, second returns final_result.
+	var callCount atomic.Int32
+	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
+		n := callCount.Add(1)
+		if n == 1 {
+			// LLM asks to search the codebase
+			return 200, json.RawMessage(`{
+                "id": "chatcmpl-sc-1",
+                "object": "chat.completion",
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_sc1",
+                            "type": "function",
+                            "function": {
+                                "name": "search_codebase",
+                                "arguments": "{\"query\": \"CalculateTotal function definition\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+            }`)
+		}
+		// Second call: LLM received the error from search_codebase and produces final result
+		return 200, defaultLLMResponse
+	}
+
+	_, repoID, _ := SetupProviderAndRepo(t, clients, gitlab)
+
+	triggerResp, err := clients.Review.TriggerReview(context.Background(),
+		connect.NewRequest(&apiv1.TriggerReviewRequest{RepoId: repoID, MrNumber: 1}))
+	if err != nil {
+		t.Fatalf("TriggerReview: %v", err)
+	}
+	runID := triggerResp.Msg.ReviewRun.Id
+
+	run := PollReviewRun(t, clients.Review, runID,
+		apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED, 60*time.Second, 2*time.Second)
+
+	if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED {
+		t.Errorf("expected COMPLETED, got %s", run.Status)
+	}
+	// LLM was called twice: once to get search_codebase call, once after receiving the error
+	if callCount.Load() != 2 {
+		t.Errorf("expected 2 LLM calls (tool call + final), got %d", callCount.Load())
+	}
+	// The second LLM request must contain the search_codebase tool result (error message)
+	reqs := llm.Requests()
+	if len(reqs) >= 2 {
+		body := string(reqs[1].Body)
+		if !strings.Contains(body, "search context not available") {
+			t.Errorf("second LLM request missing search_codebase error result: %s", body)
+		}
+	}
+	// Review still posted comments despite the tool error
+	if len(run.Comments) == 0 {
+		t.Errorf("expected comments in completed review after search_codebase error")
 	}
 }
 

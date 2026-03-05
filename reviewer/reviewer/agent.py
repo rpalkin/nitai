@@ -8,7 +8,7 @@ from pydantic_ai.settings import ModelSettings
 
 from .models import ReviewResponse
 from .prompt import SYSTEM_PROMPT
-from .tools import ReviewDeps, read_file_from_repo
+from .tools import SEARCH_MCP_URL, ReviewDeps, read_file_from_repo, search_mcp
 
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "anthropic/claude-sonnet-4-20250514")
@@ -38,3 +38,23 @@ async def read_file(ctx: RunContext[ReviewDeps], file_path: str) -> str:
     return await asyncio.to_thread(
         read_file_from_repo, ctx.deps.repo_path, ctx.deps.target_branch_sha, file_path
     )
+
+
+@review_agent.tool
+async def search_codebase(ctx: RunContext[ReviewDeps], query: str) -> str:
+    """Search the codebase for code semantically related to the query."""
+    if not ctx.deps.search_collection:
+        return "Error: search context not available for this review"
+    results = await search_mcp(SEARCH_MCP_URL, ctx.deps.search_collection, query)
+    if isinstance(results, str):
+        return results  # error string
+    if not results:
+        return "No results found."
+    parts = []
+    for r in results:
+        score = r.get("score")
+        score_str = f" ({score})" if score is not None else ""
+        file_path = r.get("file_path", "unknown")
+        content = r.get("content", "")
+        parts.append(f"## {file_path}{score_str}\n```\n{content}\n```")
+    return "\n\n".join(parts)

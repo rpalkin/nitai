@@ -11,6 +11,7 @@ class ReviewRequest(BaseModel):
     changed_files: list[str]
     repo_path: str | None = None
     target_branch_sha: str | None = None
+    search_collection: str | None = None
 
 
 class ReviewComment(BaseModel):

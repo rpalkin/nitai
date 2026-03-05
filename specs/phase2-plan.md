@@ -448,7 +448,7 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 
 ---
 
-## Subphase 2.8 — Search Tool Integration for Reviewer
+## Subphase 2.8 — Search Tool Integration for Reviewer ✓ Done
 
 **Goal:** Reviewer agent can semantically search the codebase via search-MCP during review.
 
@@ -492,6 +492,20 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 # Check logs: search tool calls with queries and results
 # Verify search-mcp container stays healthy across multiple reviews
 ```
+
+### Implementation notes
+
+**What changed from the plan:**
+- Used `fastmcp.Client` for MCP over HTTP instead of raw httpx JSON-RPC — handles `initialize` → `initialized` notification → `tools/call` automatically. Reduces `search_mcp()` to ~10 lines. `fastmcp>=2.2.0` added as a main dep; `httpx` dropped from main deps (kept in test deps, pulled transitively by pydantic-ai anyway).
+- `SearchMCPClient` class was not created — a standalone async `search_mcp()` function is sufficient and simpler.
+- Collection name is passed via `ReviewDeps.search_collection` (added field); `search_collection` is empty until 2.9 wires the full pipeline, and the tool degrades gracefully.
+- `SearchCollection` field added to Go-side `reviewerInput` struct (unpopulated until 2.9).
+
+**Architectural decisions:**
+- `fastmcp.Client` handles the full MCP protocol (initialize + initialized notification + tools/call); no manual session header management needed.
+- All `search_mcp()` errors return a human-readable error string — same graceful degradation pattern as `read_file`.
+- Score formatting in `search_codebase` fixed: uses `is not None` check instead of `!= ""` to handle `score=0.0` correctly.
+- 36 unit tests pass; e2e tests updated with `search_codebase` tool assertion in `TestFullPipelineViaTriggerReview` and new `TestSearchCodebaseToolGracefulDegradation`.
 
 ---
 

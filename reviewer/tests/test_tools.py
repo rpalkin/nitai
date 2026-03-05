@@ -1,6 +1,7 @@
 """Unit tests for reviewer/tools.py"""
+import json
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -9,6 +10,7 @@ from reviewer.tools import (
     _validate_file_path,
     _validate_sha,
     read_file_from_repo,
+    search_mcp,
 )
 
 VALID_SHA = "a" * 40
@@ -155,6 +157,97 @@ class TestReadFileFromRepo:
 
 
 # ---------------------------------------------------------------------------
+# search_mcp
+# ---------------------------------------------------------------------------
+
+
+_SEARCH_RESULTS = [
+    {"file_path": "src/foo.go", "score": 0.95, "content": "func Foo() {}", "project_root": "/repo"},
+    {"file_path": "src/bar.go", "score": 0.80, "content": "func Bar() {}", "project_root": "/repo"},
+]
+
+
+def _make_text_content(text: str):
+    obj = MagicMock()
+    obj.text = text
+    return obj
+
+
+def _make_mock_client(call_tool_result=None, call_tool_side_effect=None):
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    if call_tool_side_effect is not None:
+        mock_client.call_tool = AsyncMock(side_effect=call_tool_side_effect)
+    else:
+        mock_client.call_tool = AsyncMock(return_value=call_tool_result)
+    return mock_client
+
+
+@pytest.mark.asyncio
+class TestSearchMcp:
+    async def test_successful_search(self):
+        content = [_make_text_content(json.dumps(_SEARCH_RESULTS))]
+        mock_client = _make_mock_client(call_tool_result=content)
+
+        with patch("reviewer.tools.Client", return_value=mock_client):
+            result = await search_mcp("http://search-mcp:8080", "my-repo", "find Foo function")
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0]["file_path"] == "src/foo.go"
+        assert result[1]["score"] == 0.80
+        mock_client.call_tool.assert_awaited_once_with(
+            "search", {"query": "find Foo function", "collection": "my-repo", "top_k": 5}
+        )
+
+    async def test_connection_error(self):
+        mock_client = _make_mock_client(call_tool_side_effect=ConnectionError("Connection refused"))
+
+        with patch("reviewer.tools.Client", return_value=mock_client):
+            result = await search_mcp("http://search-mcp:8080", "my-repo", "query")
+
+        assert isinstance(result, str)
+        assert "Error" in result
+
+    async def test_timeout(self):
+        mock_client = _make_mock_client(call_tool_side_effect=TimeoutError("timed out"))
+
+        with patch("reviewer.tools.Client", return_value=mock_client):
+            result = await search_mcp("http://search-mcp:8080", "my-repo", "query")
+
+        assert isinstance(result, str)
+        assert "Error" in result
+
+    async def test_empty_results(self):
+        mock_client = _make_mock_client(call_tool_result=[])
+
+        with patch("reviewer.tools.Client", return_value=mock_client):
+            result = await search_mcp("http://search-mcp:8080", "my-repo", "query")
+
+        assert result == []
+
+    async def test_invalid_json(self):
+        content = [_make_text_content("not-json{{")]
+        mock_client = _make_mock_client(call_tool_result=content)
+
+        with patch("reviewer.tools.Client", return_value=mock_client):
+            result = await search_mcp("http://search-mcp:8080", "my-repo", "query")
+
+        assert isinstance(result, str)
+        assert "Error" in result
+
+    async def test_server_error(self):
+        mock_client = _make_mock_client(call_tool_side_effect=RuntimeError("server error"))
+
+        with patch("reviewer.tools.Client", return_value=mock_client):
+            result = await search_mcp("http://search-mcp:8080", "my-repo", "query")
+
+        assert isinstance(result, str)
+        assert "Error" in result
+
+
+# ---------------------------------------------------------------------------
 # ReviewDeps
 # ---------------------------------------------------------------------------
 
@@ -164,8 +257,14 @@ class TestReviewDeps:
         deps = ReviewDeps(repo_path=None, target_branch_sha=None)
         assert deps.repo_path is None
         assert deps.target_branch_sha is None
+        assert deps.search_collection is None
 
     def test_both_set(self):
         deps = ReviewDeps(repo_path="/repo.git", target_branch_sha=VALID_SHA)
         assert deps.repo_path == "/repo.git"
         assert deps.target_branch_sha == VALID_SHA
+        assert deps.search_collection is None
+
+    def test_with_search_collection(self):
+        deps = ReviewDeps(repo_path="/repo.git", target_branch_sha=VALID_SHA, search_collection="my-repo")
+        assert deps.search_collection == "my-repo"

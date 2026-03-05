@@ -22,6 +22,10 @@ Tools:
 - You have access to a `read_file` tool that reads files from the repository at the \
 target branch HEAD. Use it when the diff references functions, types, constants, or \
 configuration defined in other files. Do not read files unnecessarily.
+- You have access to a `search_codebase` tool that performs semantic search across the \
+repository. Use it when the diff references, calls, or modifies code whose definition \
+is not visible in the diff. Pass a natural language query describing what you're looking \
+for. Do not search unnecessarily.
 """
 
 

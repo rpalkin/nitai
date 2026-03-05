@@ -36,7 +36,7 @@
 ## Phase 2 — Semantic Search & Context-Aware Review
 
 - **Status:** In progress
-- **Completed:** 2.1 (Webhook Endpoint & Signature Validation), 2.2 (Webhook → Restate Dispatch), 2.3 (Debounce & Diff-Hash Dedup), 2.4 (Draft MR Tracking), 2.5 (Repo Syncer Service), 2.6 (Indexer as Restate Service), 2.7 (File Reader Tool for Reviewer)
+- **Completed:** 2.1 (Webhook Endpoint & Signature Validation), 2.2 (Webhook → Restate Dispatch), 2.3 (Debounce & Diff-Hash Dedup), 2.4 (Draft MR Tracking), 2.5 (Repo Syncer Service), 2.6 (Indexer as Restate Service), 2.7 (File Reader Tool for Reviewer), 2.8 (Search Tool Integration for Reviewer)
 - **Infrastructure:** Go e2e test framework (`e2e/`) — mock GitLab + LLM servers, testcontainers-go compose, 28 planned test cases (see `specs/e2e-cases.md`)
 - **Notes:** See `phase2-plan.md` for detailed implementation notes and decisions.
 

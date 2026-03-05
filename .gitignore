@@ -19,8 +19,9 @@ deploy/overlays/local/secret.env
 # direnv — local shell environment loader
 .envrc
 
-# Generated protobuf Go code
-gen/go/
+# Generated protobuf Go code (go.mod kept so module resolution works without make proto)
+gen/go/**
+!gen/go/go.mod
 
 # PostgreSQL data volume
 pgdata/

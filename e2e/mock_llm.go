@@ -115,4 +115,5 @@ func (l *LLMMock) Reset() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.requests = nil
+	l.ResponseFunc = nil
 }

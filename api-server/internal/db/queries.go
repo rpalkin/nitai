@@ -167,13 +167,14 @@ func UpsertRepos(ctx context.Context, pool *pgxpool.Pool, repos []RepoUpsertInpu
 	return nil
 }
 
-// ListReposByProvider returns all repositories for a given provider.
+// ListReposByProvider returns all repositories for a given provider (only if the provider is not soft-deleted).
 func ListReposByProvider(ctx context.Context, pool *pgxpool.Pool, providerID string) ([]RepoRow, error) {
 	const q = `
-		SELECT id, provider_id, remote_id, name, full_path, review_enabled, created_at
-		FROM repositories
-		WHERE provider_id = $1
-		ORDER BY full_path`
+		SELECT r.id, r.provider_id, r.remote_id, r.name, r.full_path, r.review_enabled, r.created_at
+		FROM repositories r
+		JOIN providers p ON p.id = r.provider_id AND p.deleted_at IS NULL
+		WHERE r.provider_id = $1
+		ORDER BY r.full_path`
 
 	rows, err := pool.Query(ctx, q, providerID)
 	if err != nil {

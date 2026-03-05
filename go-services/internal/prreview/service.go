@@ -59,14 +59,23 @@ type reviewerOutput struct {
 }
 
 // Run orchestrates the full PR review pipeline. Returns the review_run_id.
-func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (string, error) {
+func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult string, finalErr error) {
 	// Smart debounce: only delay when a recent invocation was cancelled (rapid push scenario).
-	// First trigger for an MR proceeds immediately.
+	// First trigger for an MR proceeds immediately. Completed invocations do not trigger debounce.
 	lastStarted, _ := restate.Get[int64](ctx, "last_started_at")
+	lastCompleted, _ := restate.Get[int64](ctx, "last_completed_at")
 	now := time.Now().UnixMilli()
 	restate.Set(ctx, "last_started_at", now)
 
-	if lastStarted > 0 && (now-lastStarted) < 3*60*1000 {
+	// Mark this invocation as completed when it exits successfully, so subsequent
+	// invocations can distinguish a normal completion from a cancellation.
+	defer func() {
+		if finalErr == nil {
+			restate.Set(ctx, "last_completed_at", now)
+		}
+	}()
+
+	if lastStarted > 0 && lastCompleted != lastStarted && (now-lastStarted) < 3*60*1000 {
 		// A recent invocation was cancelled — debounce before proceeding.
 		if err := restate.Sleep(ctx, 3*time.Minute); err != nil {
 			return "", err

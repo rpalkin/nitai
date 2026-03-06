@@ -509,7 +509,7 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 
 ---
 
-## Subphase 2.9 — Wire Full Pipeline (PRReview.Run v2)
+## Subphase 2.9 — Wire Full Pipeline (PRReview.Run v2) 🧪 In test
 
 **Goal:** `PRReview.Run` orchestrates the complete Phase 2 pipeline: debounce → fetch → dedup → sync → index → review (with tools) → post.
 
@@ -555,6 +555,17 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 # 7. Push again quickly twice → only one new review
 # 8. Verify in Restate UI: pipeline steps visible in invocation timeline
 ```
+
+### Implementation notes
+
+**What changed from the plan:**
+- `GetBranchIndex` / `UpsertBranchIndex` added to `go-services/internal/db/queries.go` (not in the original plan; needed to track per-branch index state).
+- Skip-indexing optimization: if `branch_indexes` already has the current `HeadSHA`, the `Indexer.IndexRepo` call is skipped entirely.
+
+**Architectural decisions:**
+- `sanitizeCollectionName(repoID, branch)` uses `repoID + "_" + safe_branch` (replacing `/`, `-`, `.` with `_`), consistent with the indexer Python convention.
+- SyncRepo failure is fatal (review requires the repo). IndexRepo failure is non-fatal — `collectionName` is set to `""` and the reviewer proceeds without search tools.
+- `UpsertBranchIndex` stores `idxResult.CollectionName` (returned by the indexer) rather than the locally-derived name, so any indexer-side renaming is respected.
 
 ---
 

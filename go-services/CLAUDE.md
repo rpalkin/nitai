@@ -1,6 +1,6 @@
 # go-services — CLAUDE.md
 
-Go Restate service handlers that orchestrate the PR review pipeline. Registers three services with Restate: `DiffFetcher`, `PostReview`, and `PRReview` (Virtual Object).
+Go Restate service handlers that orchestrate the PR review pipeline. Registers four services with Restate: `DiffFetcher`, `PostReview`, `PRReview` (Virtual Object), and `RepoSyncer`.
 
 ## Commands
 
@@ -44,16 +44,18 @@ docker compose up worker
 |---|---|---|---|
 | `DiffFetcher` | Service | `FetchPRDetails` | Fetches MR diff + metadata from GitLab. Reads provider credentials from DB (not passed in request). |
 | `PostReview` | Service | `Post` | Posts summary comment + inline comments to GitLab MR. Idempotent via `provider_comment_id` check. |
-| `PRReview` | Virtual Object | `Run` (exclusive) | Orchestrates the full pipeline: debounce → fetch details → dedup → draft guard → fetch diff → call Reviewer → store results → post comments. Keyed by `<repo_id>-<mr_number>`. |
+| `PRReview` | Virtual Object | `Run` (exclusive) | Orchestrates the full Phase 2 pipeline: debounce → fetch → dedup → draft guard → SyncRepo → IndexRepo → Reviewer (with tools) → post comments. Keyed by `<repo_id>-<mr_number>`. |
+| `RepoSyncer` | Service | `SyncRepo` | Maintains bare git clones on `/data/repos/<repo_id>/`. Clones on first call, fetches on subsequent. Returns `head_sha` of target branch. |
 
 ### Internal Packages
 
 - **`config/`** — env var loading
 - **`crypto/`** — AES-256-GCM encrypt/decrypt (copy of `api-server/internal/crypto/`, keep in sync)
-- **`db/`** — pgx pool wrapper + 9 hand-written query functions in `queries.go`
+- **`db/`** — pgx pool wrapper + hand-written query functions in `queries.go` (includes `GetBranchIndex`, `UpsertBranchIndex` for indexer state tracking)
 - **`difffetcher/`** — `DiffFetcher` Restate service. Decrypts provider token, fetches MR details + diff via GitLab client. Also handles diff-hash dedup (compares HeadSHA against latest completed review).
 - **`postreview/`** — `PostReview` Restate service. Posts summary + inline comments, updates DB with `provider_comment_id`.
-- **`prreview/`** — `PRReview` Virtual Object. Orchestrator: smart debounce → DiffFetcher (details + dedup) → draft guard → DiffFetcher (diff) → Reviewer (Python, cross-language) → PostReview. Uses Virtual Object state for debounce timing.
+- **`prreview/`** — `PRReview` Virtual Object. Full Phase 2 orchestrator: smart debounce → DiffFetcher (details + dedup) → draft guard → RepoSyncer → Indexer (Python, cross-language) → Reviewer (Python, cross-language, with `repo_path`, `target_branch_sha`, `search_collection`) → PostReview. Uses Virtual Object state for debounce timing.
+- **`reposyncer/`** — `RepoSyncer` Restate service. Maintains bare git clones via `go-git` (pure Go, no shell-out). Handles clone, fetch, and remote URL updates. Returns `head_sha` for the target branch.
 - **`provider/`** — `GitProvider` interface + GitLab REST API v4 implementation (hand-rolled HTTP, no go-gitlab library)
   - `provider.go` — interface definition + sentinel errors (`ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`, `ErrRateLimited`)
   - `gitlab/gitlab.go` — implementation: `ListRepos`, `GetMRDiff`, `GetMRDetails`, `PostComment`, `PostInlineComment`
@@ -75,3 +77,7 @@ docker compose up worker
 - **Diff-hash dedup** — if `HeadSHA` matches the latest completed review for the same repo+MR and `Force == false`, the run is marked `skipped` and exits early.
 - **Draft guard** — `FetchResponse.Draft` (from `MRDetails.Draft`) is checked after fetch. If MR is still a draft, run is marked `draft` and exits early. Handles the race where MR was marked draft between webhook receipt and review execution.
 - **Review statuses** — `review_status` enum: `pending`, `running`, `completed`, `failed`, `skipped` (dedup match), `draft` (MR is a draft)
+- **RepoSyncer uses go-git** — pure Go git implementation (`github.com/go-git/go-git/v5`), no shell-out, no `gc.auto` concern. Auth via `http.BasicAuth` (not embedded in URL). Bare clones stored at `/data/repos/<repo_id>/`.
+- **RepoSyncer is a plain Service** (not Virtual Object) — stateless, concurrent calls for the same repo are safe (go-git clone is atomic, fetch is read-safe).
+- **PRReview.Run v2 pipeline** — debounce → fetch → dedup → draft guard → SyncRepo → IndexRepo → Reviewer (with `repo_path`, `target_branch_sha`, `search_collection`) → PostReview. SyncRepo failure is fatal; IndexRepo failure is non-fatal (review proceeds without search).
+- **Branch index tracking** — `branch_indexes` table tracks `last_indexed_commit` per repo+branch. If already at `head_sha`, the `Indexer.IndexRepo` call is skipped entirely.

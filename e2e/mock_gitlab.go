@@ -3,13 +3,22 @@
 package e2e
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+
+	gogithttp "github.com/go-git/go-git/v6/backend/http"
+	gogitbilly "github.com/go-git/go-billy/v6/osfs"
+	gogitcache "github.com/go-git/go-git/v6/plumbing/cache"
+	gogitstorage "github.com/go-git/go-git/v6/storage"
+	gogittransport "github.com/go-git/go-git/v6/plumbing/transport"
+	gogitfs "github.com/go-git/go-git/v6/storage/filesystem"
 )
 
 // PostedNote records a summary note POST.
@@ -45,6 +54,37 @@ type RecordedRequest struct {
 	Body   []byte
 }
 
+// gitRepoLoader implements transport.Loader for the mock git smart HTTP server.
+// Registered paths return their storer; unregistered paths return ErrRepositoryNotFound.
+type gitRepoLoader struct {
+	mu    sync.RWMutex
+	repos map[string]gogitstorage.Storer // URL path (e.g. "/group/repo.git") -> storer
+}
+
+func (l *gitRepoLoader) Load(ep *gogittransport.Endpoint) (gogitstorage.Storer, error) {
+	l.mu.RLock()
+	s, ok := l.repos[ep.Path]
+	keys := make([]string, 0, len(l.repos))
+	for k := range l.repos {
+		keys = append(keys, k)
+	}
+	l.mu.RUnlock()
+	log.Printf("[mock-gitlab] gitRepoLoader.Load: ep.Path=%q, registered=%v, found=%v", ep.Path, keys, ok)
+	if !ok {
+		return nil, gogittransport.ErrRepositoryNotFound
+	}
+	return s, nil
+}
+
+func (l *gitRepoLoader) register(urlPath, bareDir string) {
+	log.Printf("[mock-gitlab] registering git repo: urlPath=%q, bareDir=%q", urlPath, bareDir)
+	fs := gogitbilly.New(bareDir)
+	s := gogitfs.NewStorage(fs, gogitcache.NewObjectLRUDefault())
+	l.mu.Lock()
+	l.repos[urlPath] = s
+	l.mu.Unlock()
+}
+
 // GitLabMock is a configurable mock GitLab API server.
 type GitLabMock struct {
 	Server *httptest.Server
@@ -59,6 +99,12 @@ type GitLabMock struct {
 
 	// Per-MR config: "projectID/mrIID" -> config
 	mrConfigs map[string]*MRConfig
+
+	// gitRepoPath is the filesystem path to a bare git repo to serve via smart HTTP.
+	// When set, requests to /<path_with_namespace>.git/** are served via go-git HTTP backend.
+	gitRepoPath string
+	gitLoader   *gitRepoLoader
+	gitBackend  *gogithttp.Backend
 }
 
 type GitLabProject struct {
@@ -76,8 +122,11 @@ type MRConfig struct {
 }
 
 func NewGitLabMock() *GitLabMock {
+	loader := &gitRepoLoader{repos: make(map[string]gogitstorage.Storer)}
 	g := &GitLabMock{
-		mrConfigs: make(map[string]*MRConfig),
+		mrConfigs:  make(map[string]*MRConfig),
+		gitLoader:  loader,
+		gitBackend: gogithttp.NewBackend(loader),
 	}
 	l, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
@@ -97,10 +146,11 @@ func (g *GitLabMock) HostURL() string {
 }
 
 func (g *GitLabMock) handle(w http.ResponseWriter, r *http.Request) {
-	// Record the request
+	// Record the request body (read + restore so downstream handlers still see it).
 	var bodyBytes []byte
 	if r.Body != nil {
 		bodyBytes, _ = io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
 	g.mu.Lock()
@@ -109,7 +159,33 @@ func (g *GitLabMock) handle(w http.ResponseWriter, r *http.Request) {
 		Path:   r.URL.Path,
 		Body:   bodyBytes,
 	})
+	projects := g.projects
 	g.mu.Unlock()
+
+	// Serve git smart HTTP for any path matching a known project's .git prefix.
+	// Delegates to go-git v6 backend/http which implements full smart HTTP protocol.
+	for _, proj := range projects {
+		gitPrefix := "/" + proj.PathWithNamespace + ".git"
+		if strings.HasPrefix(r.URL.Path, gitPrefix) {
+			log.Printf("[mock-gitlab] git request: %s %s (body=%d bytes)", r.Method, r.URL.String(), len(bodyBytes))
+			rec := httptest.NewRecorder()
+			g.gitBackend.ServeHTTP(rec, r)
+			log.Printf("[mock-gitlab] git response: status=%d, content-type=%s, body=%d bytes",
+				rec.Code, rec.Header().Get("Content-Type"), rec.Body.Len())
+			if rec.Code >= 400 {
+				log.Printf("[mock-gitlab] git response body: %s", rec.Body.String()[:min(500, rec.Body.Len())])
+			}
+			// Copy recorded response to the real writer
+			for k, vs := range rec.Header() {
+				for _, v := range vs {
+					w.Header().Add(k, v)
+				}
+			}
+			w.WriteHeader(rec.Code)
+			w.Write(rec.Body.Bytes())
+			return
+		}
+	}
 
 	segments := strings.Split(r.URL.Path, "/")
 	// Path: /api/v4/projects/{id}/merge_requests/{iid}[/suffix]
@@ -121,9 +197,6 @@ func (g *GitLabMock) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" && len(segments) >= 4 && segments[3] == "projects" && len(segments) == 4 {
 		page := r.URL.Query().Get("page")
 		if page == "" || page == "1" {
-			g.mu.Lock()
-			projects := g.projects
-			g.mu.Unlock()
 			json.NewEncoder(w).Encode(projects)
 		} else {
 			w.Write([]byte("[]"))
@@ -219,6 +292,18 @@ func (g *GitLabMock) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, `{"message":"404 Not found"}`, http.StatusNotFound)
+}
+
+// SetGitRepoPath configures the mock to serve the bare git repo at path via smart HTTP.
+// Must be called after SetProjects so the project paths are known.
+func (g *GitLabMock) SetGitRepoPath(path string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.gitRepoPath = path
+	for _, proj := range g.projects {
+		urlPath := proj.PathWithNamespace + ".git"
+		g.gitLoader.register(urlPath, path)
+	}
 }
 
 func (g *GitLabMock) SetProjects(projects []GitLabProject) {

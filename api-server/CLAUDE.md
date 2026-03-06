@@ -61,6 +61,7 @@ SQL files in `migrations/` managed by golang-migrate, embedded in the binary:
 - `000005_restate_invocation_id` — adds `restate_invocation_id` to review_runs
 - `000006_diff_hash` — adds `skipped` status to review_status enum and `diff_hash` to review_runs
 - `000007_draft_status` — adds `draft` status to review_status enum
+- `000008_branch_indexes` — creates `branch_indexes` table (repo_id, branch, last_indexed_commit, collection_name, updated_at) with unique constraint on (repo_id, branch)
 
 ### HTTP Endpoints
 

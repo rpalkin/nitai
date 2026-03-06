@@ -42,7 +42,7 @@ def _fetch_existing_hashes(qdrant_client: QdrantClient, collection_name: str) ->
     return hashes
 
 
-async def index_repo(
+def index_repo(
     repo_path: str,
     sha: str,
     collection_name: str,
@@ -67,10 +67,13 @@ async def index_repo(
     if model not in MODEL_DIMENSIONS:
         raise ValueError(f"Unknown model '{model}'. Supported: {', '.join(MODEL_DIMENSIONS)}")
 
+    import os
+    api_base = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+
     Settings.embed_model = OpenAIEmbedding(
         model=model,
         dimensions=MODEL_DIMENSIONS[model],
-        api_base="https://openrouter.ai/api/v1",
+        api_base=api_base,
         api_key=api_key,
         default_headers={
             "HTTP-Referer": "https://github.com/ai-reviewer",
@@ -119,8 +122,9 @@ async def index_repo(
         for rel in removed_files:
             index.delete_ref_doc(rel, delete_from_docstore=True)
 
-    # Compute current hashes for files to process
+    # Compute current hashes for files to process and cache raw bytes
     current_hashes: dict[str, str] = {}
+    raw_cache: dict[str, bytes] = {}
     files_needing_index: list[str] = []
 
     for rel in files_to_process:
@@ -131,6 +135,7 @@ async def index_repo(
         current_hashes[rel] = fhash
         if existing_hashes.get(rel) != fhash:
             files_needing_index.append(rel)
+            raw_cache[rel] = raw
 
     # Delete outdated chunks for files that changed
     for rel in files_needing_index:
@@ -142,7 +147,7 @@ async def index_repo(
     files_indexed = 0
 
     for rel in files_needing_index:
-        raw = _read_file_bytes(repo_path, sha, rel)
+        raw = raw_cache.get(rel)
         if raw is None:
             continue
         try:

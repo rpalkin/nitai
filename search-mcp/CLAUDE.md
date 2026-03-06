@@ -39,7 +39,7 @@ Two files:
 
 ### Key Notes
 
-- `MODEL_DIMENSIONS` dict is duplicated in both `server.py` and `indexer/main.py` — keep them in sync
+- `MODEL_DIMENSIONS` dict is duplicated in both `server.py` and `indexer/indexing.py` — keep them in sync
 - Embeddings via OpenRouter (`https://openrouter.ai/api/v1`), OpenAI-compatible API
 - Host port is 8081 (not 8080) to avoid conflict with Restate ingress
 - Transport is controlled by `MCP_TRANSPORT` env var: `stdio` (default) or `streamable-http` (Docker). In HTTP mode, `MCP_HOST` and `MCP_PORT` configure the listener.

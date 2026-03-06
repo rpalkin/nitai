@@ -66,7 +66,7 @@ func (s *RepoSyncer) SyncRepo(ctx restate.Context, req SyncRequest) (SyncResult,
 	repoPath := filepath.Join(reposBase, req.RepoID)
 	gitRepo, err := syncBareRepo(ctx, repoPath, cloneURL, string(token))
 	if err != nil {
-		return SyncResult{}, fmt.Errorf("syncing repo: %w", err)
+		return SyncResult{}, restate.TerminalError(fmt.Errorf("syncing repo: %w", err), 500)
 	}
 
 	hash, err := gitRepo.ResolveRevision(plumbing.Revision("refs/heads/" + req.TargetBranch))

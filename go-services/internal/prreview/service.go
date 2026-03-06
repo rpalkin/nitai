@@ -3,6 +3,7 @@ package prreview
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	restate "github.com/restatedev/sdk-go"
@@ -11,6 +12,7 @@ import (
 	"ai-reviewer/go-services/internal/db"
 	"ai-reviewer/go-services/internal/difffetcher"
 	"ai-reviewer/go-services/internal/postreview"
+	"ai-reviewer/go-services/internal/reposyncer"
 )
 
 // PRReview is a Restate Virtual Object that orchestrates the full PR review pipeline.
@@ -59,6 +61,29 @@ type reviewComment struct {
 type reviewerOutput struct {
 	Summary  string          `json:"summary"`
 	Comments []reviewComment `json:"comments"`
+}
+
+// indexRequest is the payload sent to the Python Indexer service.
+type indexRequest struct {
+	RepoID            string  `json:"repo_id"`
+	RepoPath          string  `json:"repo_path"`
+	Branch            string  `json:"branch"`
+	HeadSHA           string  `json:"head_sha"`
+	CollectionName    string  `json:"collection_name"`
+	LastIndexedCommit *string `json:"last_indexed_commit"`
+}
+
+// indexResult is the response from the Python Indexer service.
+type indexResult struct {
+	CollectionName string `json:"collection_name"`
+	FilesIndexed   int    `json:"files_indexed"`
+	ChunksUpserted int    `json:"chunks_upserted"`
+}
+
+// sanitizeCollectionName returns a Qdrant-safe collection name for a repo+branch.
+func sanitizeCollectionName(repoID, branch string) string {
+	safe := strings.NewReplacer("/", "_", "-", "_", ".", "_").Replace(branch)
+	return repoID + "_" + safe
 }
 
 // Run orchestrates the full PR review pipeline. Returns the review_run_id.
@@ -128,19 +153,19 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		return runID, nil
 	}
 
-	// Step 3: Persist diff hash for future dedup.
+	// Step 4: Persist diff hash for future dedup.
 	if fetchResp.DiffHash != "" {
 		if err := db.UpdateReviewRunDiffHash(ctx, p.pool, runID, fetchResp.DiffHash); err != nil {
 			return fail(fmt.Errorf("storing diff hash: %w", err))
 		}
 	}
 
-	// Step 4: Mark run as running.
+	// Step 5: Mark run as running.
 	if err := db.UpdateReviewRunStatus(ctx, p.pool, runID, "running"); err != nil {
 		return fail(fmt.Errorf("updating run status: %w", err))
 	}
 
-	// Step 5: Short-circuit if diff is too large to review.
+	// Step 6: Short-circuit if diff is too large to review.
 	if fetchResp.DiffTooLarge {
 		_, err := restate.Service[postreview.PostResponse](ctx, "PostReview", "Post").
 			Request(postreview.PostRequest{
@@ -160,22 +185,69 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		return runID, nil
 	}
 
-	// Step 6: Call the Python Reviewer service (cross-language via Restate).
+	// Step 7: Sync the repository (clone or fetch bare git clone on shared volume).
+	syncResult, err := restate.Service[reposyncer.SyncResult](ctx, "RepoSyncer", "SyncRepo").
+		Request(reposyncer.SyncRequest{
+			RepoID:       req.RepoID,
+			TargetBranch: fetchResp.TargetBranch,
+		})
+	if err != nil {
+		return fail(fmt.Errorf("syncing repo: %w", err))
+	}
+
+	// Step 8: Index the repository for semantic search (graceful degradation on failure).
+	collectionName := sanitizeCollectionName(req.RepoID, fetchResp.TargetBranch)
+	lastCommit, storedCollection, found, err := db.GetBranchIndex(ctx, p.pool, req.RepoID, fetchResp.TargetBranch)
+	if err != nil {
+		log.Printf("PRReview: reading branch index: %v", err)
+	}
+	if found && lastCommit == syncResult.HeadSHA {
+		log.Printf("PRReview: branch index up to date (sha=%s), skipping indexing", syncResult.HeadSHA)
+		collectionName = storedCollection
+	} else {
+		var lastCommitPtr *string
+		if found {
+			lastCommitPtr = &lastCommit
+		}
+		idxResult, idxErr := restate.Service[indexResult](ctx, "Indexer", "IndexRepo").
+			Request(indexRequest{
+				RepoID:            req.RepoID,
+				RepoPath:          syncResult.RepoPath,
+				Branch:            fetchResp.TargetBranch,
+				HeadSHA:           syncResult.HeadSHA,
+				CollectionName:    collectionName,
+				LastIndexedCommit: lastCommitPtr,
+			})
+		if idxErr != nil {
+			log.Printf("PRReview: indexing failed, proceeding without search: %v", idxErr)
+			collectionName = ""
+		} else {
+			if upsertErr := db.UpsertBranchIndex(ctx, p.pool, req.RepoID, fetchResp.TargetBranch, syncResult.HeadSHA, idxResult.CollectionName); upsertErr != nil {
+				log.Printf("PRReview: upserting branch index: %v", upsertErr)
+			}
+			collectionName = idxResult.CollectionName
+		}
+	}
+
+	// Step 9: Call the Python Reviewer service (cross-language via Restate).
 	reviewer, err := restate.Service[reviewerOutput](ctx, "Reviewer", "RunReview").
 		Request(reviewerInput{
-			Diff:          fetchResp.Diff,
-			MRTitle:       fetchResp.MRTitle,
-			MRDescription: fetchResp.MRDescription,
-			MRAuthor:      fetchResp.MRAuthor,
-			SourceBranch:  fetchResp.SourceBranch,
-			TargetBranch:  fetchResp.TargetBranch,
-			ChangedFiles:  fetchResp.ChangedFiles,
+			Diff:             fetchResp.Diff,
+			MRTitle:          fetchResp.MRTitle,
+			MRDescription:    fetchResp.MRDescription,
+			MRAuthor:         fetchResp.MRAuthor,
+			SourceBranch:     fetchResp.SourceBranch,
+			TargetBranch:     fetchResp.TargetBranch,
+			ChangedFiles:     fetchResp.ChangedFiles,
+			RepoPath:         syncResult.RepoPath,
+			TargetBranchSHA:  syncResult.HeadSHA,
+			SearchCollection: collectionName,
 		})
 	if err != nil {
 		return fail(fmt.Errorf("running reviewer: %w", err))
 	}
 
-	// Step 7: Persist comments to DB before posting (idempotency).
+	// Step 10: Persist comments to DB before posting (idempotency).
 	commentInputs := make([]db.ReviewCommentInput, len(reviewer.Comments))
 	for i, c := range reviewer.Comments {
 		commentInputs[i] = db.ReviewCommentInput{
@@ -189,7 +261,7 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		return fail(fmt.Errorf("inserting review comments: %w", err))
 	}
 
-	// Step 8: Post summary and inline comments to the provider.
+	// Step 11: Post summary and inline comments to the provider.
 	_, err = restate.Service[postreview.PostResponse](ctx, "PostReview", "Post").
 		Request(postreview.PostRequest{
 			ReviewRunID:  runID,
@@ -203,7 +275,7 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		return fail(fmt.Errorf("posting review: %w", err))
 	}
 
-	// Step 9: Mark run as completed.
+	// Step 12: Mark run as completed.
 	if err := db.UpdateReviewRunStatus(ctx, p.pool, runID, "completed"); err != nil {
 		return fail(err)
 	}

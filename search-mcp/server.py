@@ -12,6 +12,7 @@ load_dotenv()
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
+OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 
 MODEL_DIMENSIONS = {
@@ -32,7 +33,7 @@ if EMBEDDING_MODEL not in MODEL_DIMENSIONS:
 Settings.embed_model = OpenAIEmbedding(
     model=EMBEDDING_MODEL,
     dimensions=MODEL_DIMENSIONS[EMBEDDING_MODEL],
-    api_base="https://openrouter.ai/api/v1",
+    api_base=OPENROUTER_BASE_URL,
     api_key=OPENROUTER_API_KEY,
     default_headers={
         "HTTP-Referer": "https://github.com/ai-reviewer",

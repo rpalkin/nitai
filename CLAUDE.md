@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `ai-reviewer` is a self-hosted AI-powered PR review system that posts summary and inline review comments on merge requests. It uses Restate for durable workflow orchestration, Pydantic AI for LLM-based review, and Qdrant for semantic code search.
 
-**Current status:** Phase 1 (MVP) complete. Phase 2 (Semantic Search & Context-Aware Review) in progress — subphases 2.1–2.4 done (webhooks, dispatch, debounce, draft tracking). See `specs/phases.md` for the full roadmap, `specs/phase2-plan.md` for current phase details, and `specs/later.md` for known issues and deferred items.
+**Current status:** Phase 1 (MVP) complete. Phase 2 (Semantic Search & Context-Aware Review) in progress — subphases 2.1–2.9 done (webhooks, dispatch, debounce, draft tracking, repo syncer, indexer, file reader tool, search tool, full pipeline wiring). Remaining: 2.10 (background indexing), 2.11 (e2e tests update). See `specs/phases.md` for the full roadmap, `specs/phase2-plan.md` for current phase details, and `specs/later.md` for known issues and deferred items.
 
 Full technical design: `specs/overview.md`
 
@@ -57,9 +57,9 @@ Each component has its own `CLAUDE.md` with detailed architecture and commands:
 | Component | Description | CLAUDE.md |
 |---|---|---|
 | [api-server](api-server/) | Go ConnectRPC HTTP server — admin API, migrations, Restate ingress client | [api-server/CLAUDE.md](api-server/CLAUDE.md) |
-| [go-services](go-services/) | Go Restate handlers — DiffFetcher, PostReview, PRReview orchestrator | [go-services/CLAUDE.md](go-services/CLAUDE.md) |
-| [reviewer](reviewer/) | Python Restate service — Pydantic AI agent, LLM-based code review | [reviewer/CLAUDE.md](reviewer/CLAUDE.md) |
-| [indexer](indexer/) | Python CLI — indexes Git repos into Qdrant with tree-sitter chunking | [indexer/CLAUDE.md](indexer/CLAUDE.md) |
+| [go-services](go-services/) | Go Restate handlers — DiffFetcher, PostReview, PRReview orchestrator, RepoSyncer | [go-services/CLAUDE.md](go-services/CLAUDE.md) |
+| [reviewer](reviewer/) | Python Restate service — Pydantic AI agent with tools (search + file reader), LLM-based code review | [reviewer/CLAUDE.md](reviewer/CLAUDE.md) |
+| [indexer](indexer/) | Python Restate service — indexes Git repos (bare clones) into Qdrant with tree-sitter chunking | [indexer/CLAUDE.md](indexer/CLAUDE.md) |
 | [search-mcp](search-mcp/) | Python FastMCP server — semantic code search over Qdrant | [search-mcp/CLAUDE.md](search-mcp/CLAUDE.md) |
 | [proto](proto/) | Protobuf API definitions (provider, repo, review services) | — |
 | [gen](gen/) | Generated Go code from protobuf (shared module) | — |
@@ -86,6 +86,7 @@ make smoke
 # or: ./tests/smoke.sh [--no-teardown]
 
 # Run e2e tests (mock mode — no external services needed, requires Docker)
+# Rebuilds containers first; output is tee'd to a unique /tmp/e2e-test-XXXXXX.log for post-failure inspection
 make e2e
 
 # Run e2e tests in live mode (requires a real GitLab instance)
@@ -134,7 +135,7 @@ Re-registration is idempotent — running `docker compose up` again is safe.
 To verify registered services manually:
 ```bash
 curl http://localhost:9070/services | jq '.services[].name'
-# Expected: DiffFetcher, PostReview, PRReview, Reviewer
+# Expected: DiffFetcher, PostReview, PRReview, RepoSyncer, Reviewer, Indexer
 ```
 
 ## Architecture
@@ -150,11 +151,12 @@ Admin API ──→ API Server (:8090 host, ConnectRPC)
                     │
                     └── Restate (:8080 ingress, :9070 admin, :9071 UI)
                             │
-                            ├── Go Worker (:9080) — DiffFetcher, PostReview, PRReview
-                            └── Python Reviewer (:9090) — Reviewer
+                            ├── Go Worker (:9080) — DiffFetcher, PostReview, PRReview, RepoSyncer
+                            ├── Python Reviewer (:9090) — Reviewer (with search + file reader tools)
+                            └── Python Indexer (:9091) — Indexer
                                                             Qdrant (:6333 REST, :6334 gRPC)
                                                                 ▲
-                                                        Indexer / Search-MCP (:8081 host)
+                                                        Search-MCP (:8081 host)
 ```
 
 ### Ports
@@ -171,13 +173,15 @@ Admin API ──→ API Server (:8090 host, ConnectRPC)
 | Search-MCP | 8080 | 8081 |
 | Worker | 9080 | (internal only) |
 | Reviewer | 9090 | (internal only) |
+| Indexer | 9091 | (internal only) |
 
 ### Infrastructure
 
 - **PostgreSQL** — providers, repos, review runs, review comments. Migrations managed by golang-migrate (embedded in api-server binary).
 - **Restate** — durable workflow orchestration. Virtual Object `PRReview` ensures one review per MR at a time.
-- **Qdrant** — vector database on ports `6333` (REST) and `6334` (gRPC), with data persisted in `./db`. One collection per repository, named from git remote URL via `sanitize_collection_name`.
-- `MODEL_DIMENSIONS` dict is duplicated in both `indexer/main.py` and `search-mcp/server.py` — keep them in sync.
+- **Qdrant** — vector database on ports `6333` (REST) and `6334` (gRPC), with data persisted in `./db`. One collection per repo+branch, named `<repo_id>_<branch>` via `sanitize_collection_name`.
+- **Repos volume** — Docker volume mounted at `/data/repos` in worker, reviewer, and indexer containers. Stores bare git clones managed by `RepoSyncer`. One bare clone per repo at `/data/repos/<repo_id>/`.
+- `MODEL_DIMENSIONS` dict is duplicated in both `indexer/indexing.py` and `search-mcp/server.py` — keep them in sync.
 
 ### Go Multi-Module Setup
 

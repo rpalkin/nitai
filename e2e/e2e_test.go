@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 
 	// 2. Configure mock GitLab with default project list
 	gitlab.SetProjects([]GitLabProject{
-		{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git"},
+		{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git", DefaultBranch: "main"},
 	})
 
 	// 3. Create a bare git repo served via dumb HTTP for RepoSyncer tests.
@@ -1270,8 +1270,8 @@ func TestRepoSyncerCloneFailure(t *testing.T) {
 	// Register a second project (ID=200) that has no git repo served by the mock.
 	// The mock only serves group/test-project.git; nonexistent/broken-repo.git returns 404.
 	gitlab.SetProjects([]GitLabProject{
-		{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git"},
-		{ID: 200, Name: "broken-repo", PathWithNamespace: "nonexistent/broken-repo", HTTPURLToRepo: "http://gitlab.example.com/nonexistent/broken-repo.git"},
+		{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git", DefaultBranch: "main"},
+		{ID: 200, Name: "broken-repo", PathWithNamespace: "nonexistent/broken-repo", HTTPURLToRepo: "http://gitlab.example.com/nonexistent/broken-repo.git", DefaultBranch: "main"},
 	})
 	gitlab.SetMR("200", "1", &MRConfig{
 		Details: json.RawMessage(`{
@@ -1298,7 +1298,7 @@ func TestRepoSyncerCloneFailure(t *testing.T) {
 		llm.Reset()
 		// Restore original project list
 		gitlab.SetProjects([]GitLabProject{
-			{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git"},
+			{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git", DefaultBranch: "main"},
 		})
 	})
 	gitlab.Reset()

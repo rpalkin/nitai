@@ -46,6 +46,7 @@ docker compose up worker
 | `PostReview` | Service | `Post` | Posts summary comment + inline comments to GitLab MR. Idempotent via `provider_comment_id` check. |
 | `PRReview` | Virtual Object | `Run` (exclusive) | Orchestrates the full Phase 2 pipeline: debounce → fetch → dedup → draft guard → SyncRepo → IndexRepo → Reviewer (with tools) → post comments. Keyed by `<repo_id>-<mr_number>`. |
 | `RepoSyncer` | Service | `SyncRepo` | Maintains bare git clones on `/data/repos/<repo_id>/`. Clones on first call, fetches on subsequent. Returns `head_sha` of target branch. |
+| `IndexMainBranch` | Virtual Object | `Run` (exclusive) | Background indexing loop for the primary branch. Keyed by `<repo_id>`. Syncs repo → indexes → self-schedules every 6h. Triggered by `EnableReview`. |
 
 ### Internal Packages
 

@@ -509,7 +509,7 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 
 ---
 
-## Subphase 2.9 — Wire Full Pipeline (PRReview.Run v2) 🧪 In test
+## Subphase 2.9 — Wire Full Pipeline (PRReview.Run v2) ✓ Done
 
 **Goal:** `PRReview.Run` orchestrates the complete Phase 2 pipeline: debounce → fetch → dedup → sync → index → review (with tools) → post.
 
@@ -569,7 +569,7 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 
 ---
 
-## Subphase 2.10 — Background Indexing (IndexMainBranch)
+## Subphase 2.10 — Background Indexing (IndexMainBranch) 🧪 In test
 
 **Goal:** Primary branch is indexed automatically on push and on a periodic schedule, keeping the vector index warm.
 
@@ -604,6 +604,23 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 # Trigger a review: IndexRepo step should complete quickly (already indexed)
 # Wait for 6h schedule (or simulate): re-indexing runs automatically
 ```
+
+### Implementation notes
+
+**What changed from the plan:**
+- Migration `000009_default_branch` adds `default_branch TEXT NOT NULL DEFAULT 'main'` to `repositories` table.
+- `DefaultBranch` field added to `Repo` struct in both `api-server` and `go-services` provider packages (kept in sync).
+- `RepoRow` and `RepoUpsertInput` updated across both modules; all 5 query scan sites updated in `api-server/internal/db/queries.go`.
+- `go-services/internal/db/queries.go`: `RepoRow` gains `DefaultBranch` and `ReviewEnabled` fields; `GetRepoWithProvider` query updated.
+- `RepoHandler` now takes a `*restate.Client` parameter; `EnableReview` fires `SendIndexMainBranch` (fire-and-forget, errors logged and swallowed).
+- `GitLabProject` in e2e mock gains `DefaultBranch` field; all test fixtures set `DefaultBranch: "main"`.
+
+**Architectural decisions:**
+- `IndexMainBranch` is a Virtual Object keyed by `repo_id` (one active loop per repo). Uses `restate.ObjectSend` with `WithDelay(6h)` for self-scheduling.
+- `review_enabled` check in `Run`: if repo has review disabled, the handler returns without rescheduling — loop naturally terminates. Re-enabling calls `SendIndexMainBranch` to restart it.
+- SyncRepo/IndexRepo failures are logged but the 6-hour reschedule still happens (via `defer`). Background indexing must not permanently stop on transient errors.
+- `indexRequest`, `indexResult`, `sanitizeCollectionName` are duplicated from `prreview` package (3 small items, consistent with project convention).
+- `SendIndexMainBranch` is a simpler fire-and-forget than `SendPRReview` — no invocation ID return needed.
 
 ---
 

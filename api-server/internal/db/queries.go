@@ -29,16 +29,18 @@ type RepoRow struct {
 	RemoteID      string
 	Name          string
 	FullPath      string
+	DefaultBranch string
 	ReviewEnabled bool
 	CreatedAt     time.Time
 }
 
 // RepoUpsertInput holds data for upserting a repository.
 type RepoUpsertInput struct {
-	ProviderID string
-	RemoteID   string
-	Name       string
-	FullPath   string
+	ProviderID    string
+	RemoteID      string
+	Name          string
+	FullPath      string
+	DefaultBranch string
 }
 
 // ReviewRunRow holds a review run row from the database.
@@ -154,13 +156,13 @@ func SoftDeleteProvider(ctx context.Context, pool *pgxpool.Pool, id string) erro
 // UpsertRepos batch-upserts repositories for a provider.
 func UpsertRepos(ctx context.Context, pool *pgxpool.Pool, repos []RepoUpsertInput) error {
 	const q = `
-		INSERT INTO repositories (provider_id, remote_id, name, full_path)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO repositories (provider_id, remote_id, name, full_path, default_branch)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (provider_id, remote_id) DO UPDATE
-		SET name = EXCLUDED.name, full_path = EXCLUDED.full_path`
+		SET name = EXCLUDED.name, full_path = EXCLUDED.full_path, default_branch = EXCLUDED.default_branch`
 
 	for _, r := range repos {
-		if _, err := pool.Exec(ctx, q, r.ProviderID, r.RemoteID, r.Name, r.FullPath); err != nil {
+		if _, err := pool.Exec(ctx, q, r.ProviderID, r.RemoteID, r.Name, r.FullPath, r.DefaultBranch); err != nil {
 			return fmt.Errorf("UpsertRepos: %w", err)
 		}
 	}
@@ -170,7 +172,7 @@ func UpsertRepos(ctx context.Context, pool *pgxpool.Pool, repos []RepoUpsertInpu
 // ListReposByProvider returns all repositories for a given provider (only if the provider is not soft-deleted).
 func ListReposByProvider(ctx context.Context, pool *pgxpool.Pool, providerID string) ([]RepoRow, error) {
 	const q = `
-		SELECT r.id, r.provider_id, r.remote_id, r.name, r.full_path, r.review_enabled, r.created_at
+		SELECT r.id, r.provider_id, r.remote_id, r.name, r.full_path, r.default_branch, r.review_enabled, r.created_at
 		FROM repositories r
 		JOIN providers p ON p.id = r.provider_id AND p.deleted_at IS NULL
 		WHERE r.provider_id = $1
@@ -185,7 +187,7 @@ func ListReposByProvider(ctx context.Context, pool *pgxpool.Pool, providerID str
 	var repos []RepoRow
 	for rows.Next() {
 		var r RepoRow
-		if err := rows.Scan(&r.ID, &r.ProviderID, &r.RemoteID, &r.Name, &r.FullPath, &r.ReviewEnabled, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.ProviderID, &r.RemoteID, &r.Name, &r.FullPath, &r.DefaultBranch, &r.ReviewEnabled, &r.CreatedAt); err != nil {
 			return nil, fmt.Errorf("ListReposByProvider scan: %w", err)
 		}
 		repos = append(repos, r)
@@ -196,13 +198,13 @@ func ListReposByProvider(ctx context.Context, pool *pgxpool.Pool, providerID str
 // GetRepo fetches a repository by ID.
 func GetRepo(ctx context.Context, pool *pgxpool.Pool, id string) (*RepoRow, error) {
 	const q = `
-		SELECT id, provider_id, remote_id, name, full_path, review_enabled, created_at
+		SELECT id, provider_id, remote_id, name, full_path, default_branch, review_enabled, created_at
 		FROM repositories
 		WHERE id = $1`
 
 	row := &RepoRow{}
 	err := pool.QueryRow(ctx, q, id).Scan(
-		&row.ID, &row.ProviderID, &row.RemoteID, &row.Name, &row.FullPath, &row.ReviewEnabled, &row.CreatedAt,
+		&row.ID, &row.ProviderID, &row.RemoteID, &row.Name, &row.FullPath, &row.DefaultBranch, &row.ReviewEnabled, &row.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -218,11 +220,11 @@ func SetReviewEnabled(ctx context.Context, pool *pgxpool.Pool, id string, enable
 	const q = `
 		UPDATE repositories SET review_enabled = $1
 		WHERE id = $2
-		RETURNING id, provider_id, remote_id, name, full_path, review_enabled, created_at`
+		RETURNING id, provider_id, remote_id, name, full_path, default_branch, review_enabled, created_at`
 
 	row := &RepoRow{}
 	err := pool.QueryRow(ctx, q, enabled, id).Scan(
-		&row.ID, &row.ProviderID, &row.RemoteID, &row.Name, &row.FullPath, &row.ReviewEnabled, &row.CreatedAt,
+		&row.ID, &row.ProviderID, &row.RemoteID, &row.Name, &row.FullPath, &row.DefaultBranch, &row.ReviewEnabled, &row.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -270,13 +272,13 @@ func GetReviewRun(ctx context.Context, pool *pgxpool.Pool, id string) (*ReviewRu
 // GetRepoByRemoteID looks up a repository by provider_id and remote_id.
 func GetRepoByRemoteID(ctx context.Context, pool *pgxpool.Pool, providerID, remoteID string) (*RepoRow, error) {
 	const q = `
-		SELECT id, provider_id, remote_id, name, full_path, review_enabled, created_at
+		SELECT id, provider_id, remote_id, name, full_path, default_branch, review_enabled, created_at
 		FROM repositories
 		WHERE provider_id = $1 AND remote_id = $2`
 
 	row := &RepoRow{}
 	err := pool.QueryRow(ctx, q, providerID, remoteID).Scan(
-		&row.ID, &row.ProviderID, &row.RemoteID, &row.Name, &row.FullPath, &row.ReviewEnabled, &row.CreatedAt,
+		&row.ID, &row.ProviderID, &row.RemoteID, &row.Name, &row.FullPath, &row.DefaultBranch, &row.ReviewEnabled, &row.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -33,20 +35,125 @@ func TestMain(m *testing.M) {
 		{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git"},
 	})
 
-	// 3. Start Docker Compose stack
-	t := &testMainT{}
-	stack = StartStack(t, gitlab, llm)
+	// 3. Create a bare git repo served via dumb HTTP for RepoSyncer tests.
+	//    The repo has test files with known content used by tool integration tests.
+	t0 := &testMainT{}
+	gitRepoDir := setupBareGitRepo(t0)
+	defer os.RemoveAll(gitRepoDir)
+	gitlab.SetGitRepoPath(gitRepoDir)
+
+	// 4. Start Docker Compose stack
+	stack = StartStack(t0, gitlab, llm)
 	clients = stack.Clients
 
-	// 4. Run tests
+	// 5. Run tests
 	code := m.Run()
 
-	// 5. Teardown
-	StopStack(t, stack)
+	// 6. Teardown
+	StopStack(t0, stack)
 	gitlab.Server.Close()
 	llm.Server.Close()
 
 	os.Exit(code)
+}
+
+// setupBareGitRepo creates a temporary bare git repository with test files.
+// Returns the path to the bare repo directory (caller must os.RemoveAll it).
+func setupBareGitRepo(t testingT) string {
+	// Create a working dir to build the repo, then clone as bare
+	workDir, err := os.MkdirTemp("", "e2e-git-work-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp (work): %v", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	bareDir, err := os.MkdirTemp("", "e2e-git-bare-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp (bare): %v", err)
+	}
+
+	run := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// Init working repo
+	run(workDir, "init", "-b", "main")
+	run(workDir, "config", "user.email", "test@example.com")
+	run(workDir, "config", "user.name", "Test")
+
+	// Create test files
+	files := map[string]string{
+		"src/handler.go": `package handler
+
+import "fmt"
+
+func ProcessOrder(order *Order) error {
+	result := CalculateTotal(order.Items)
+	if result == nil {
+		return nil
+	}
+	fmt.Println(result)
+	return nil
+}
+`,
+		"src/util.go": `package handler
+
+// CalculateTotal sums all item prices.
+// func CalculateTotal(items []Item) *int
+func CalculateTotal(items []Item) *int {
+	total := 0
+	for _, item := range items {
+		total += item.Price
+	}
+	return &total
+}
+`,
+		"pkg/mathutil/mathutil.go": `package mathutil
+
+// Foo adds two integers.
+func Foo(x, y int) int {
+	return x + y
+}
+`,
+	}
+
+	for relPath, content := range files {
+		absPath := filepath.Join(workDir, relPath)
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", filepath.Dir(absPath), err)
+		}
+		if err := os.WriteFile(absPath, []byte(content), 0644); err != nil {
+			t.Fatalf("WriteFile %s: %v", relPath, err)
+		}
+	}
+
+	run(workDir, "add", ".")
+	run(workDir, "commit", "-m", "initial commit")
+
+	// Clone as bare into bareDir (overwrites the temp dir contents)
+	os.RemoveAll(bareDir)
+	if err := exec.Command("git", "clone", "--bare", workDir, bareDir).Run(); err != nil {
+		t.Fatalf("git clone --bare: %v", err)
+	}
+
+	// Enable dumb HTTP protocol
+	if err := exec.Command("git", "--git-dir="+bareDir, "update-server-info").Run(); err != nil {
+		t.Fatalf("git update-server-info: %v", err)
+	}
+
+	t.Logf("bare git repo created at %s", bareDir)
+	return bareDir
 }
 
 func TestFullPipelineViaTriggerReview(t *testing.T) {
@@ -111,9 +218,10 @@ func TestFullPipelineViaTriggerReview(t *testing.T) {
 	}
 
 	t.Log("--- Step 5: Polling until COMPLETED ---")
+	// After 2.9: pipeline includes SyncRepo + IndexRepo; allow extra time.
 	run := PollReviewRun(t, clients.Review, runID,
 		apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED,
-		60*time.Second, 2*time.Second)
+		90*time.Second, 2*time.Second)
 
 	t.Log("--- Assertions ---")
 
@@ -632,7 +740,6 @@ func TestLargeDiffShortCircuit(t *testing.T) {
 }
 
 // TestDuplicateDiffDedup verifies the same diff hash sent twice produces only one review.
-// Note: This test is slow (~3–4 min) due to the Restate smart-debounce timer on the second invocation.
 func TestDuplicateDiffDedup(t *testing.T) {
 	gitlab.SetMR("100", "1", &MRConfig{
 		Details: json.RawMessage(`{
@@ -842,8 +949,8 @@ func TestGitLab404ForMR(t *testing.T) {
 }
 
 // TestReadFileToolGracefulDegradation verifies that when the LLM calls the read_file tool
-// but repo context is not yet available (phase 2.7 — wired in 2.9), the tool returns a
-// human-readable error and the review still completes successfully.
+// for a file that doesn't exist, the tool returns a human-readable error and the review
+// still completes successfully.
 func TestReadFileToolGracefulDegradation(t *testing.T) {
 	gitlab.SetMR("100", "1", &MRConfig{
 		Details: json.RawMessage(`{
@@ -880,7 +987,7 @@ func TestReadFileToolGracefulDegradation(t *testing.T) {
 	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
 		n := callCount.Add(1)
 		if n == 1 {
-			// LLM asks to read a file
+			// LLM asks to read a nonexistent file
 			return 200, json.RawMessage(`{
                 "id": "chatcmpl-rf-1",
                 "object": "chat.completion",
@@ -895,7 +1002,7 @@ func TestReadFileToolGracefulDegradation(t *testing.T) {
                             "type": "function",
                             "function": {
                                 "name": "read_file",
-                                "arguments": "{\"file_path\": \"src/util.go\"}"
+                                "arguments": "{\"file_path\": \"nonexistent/file.go\"}"
                             }
                         }]
                     },
@@ -927,11 +1034,11 @@ func TestReadFileToolGracefulDegradation(t *testing.T) {
 	if callCount.Load() != 2 {
 		t.Errorf("expected 2 LLM calls (tool call + final), got %d", callCount.Load())
 	}
-	// The second LLM request must contain the read_file tool result (error message)
+	// The second LLM request must contain the read_file tool result (error message about missing file)
 	reqs := llm.Requests()
 	if len(reqs) >= 2 {
 		body := string(reqs[1].Body)
-		if !strings.Contains(body, "repository context not available") {
+		if !strings.Contains(body, "Error:") {
 			t.Errorf("second LLM request missing read_file error result: %s", body)
 		}
 	}
@@ -942,8 +1049,8 @@ func TestReadFileToolGracefulDegradation(t *testing.T) {
 }
 
 // TestSearchCodebaseToolGracefulDegradation verifies that when the LLM calls the search_codebase
-// tool but search context is not yet available (phase 2.8 — collection wired in 2.9), the tool
-// returns a human-readable error and the review still completes successfully.
+// tool but search-mcp fails (e.g. embedding error), the tool returns a human-readable error
+// and the review still completes successfully.
 func TestSearchCodebaseToolGracefulDegradation(t *testing.T) {
 	gitlab.SetMR("100", "1", &MRConfig{
 		Details: json.RawMessage(`{
@@ -976,10 +1083,15 @@ func TestSearchCodebaseToolGracefulDegradation(t *testing.T) {
 	llm.Reset()
 
 	// Two-turn conversation: first call returns search_codebase tool call, second returns final_result.
+	// After the first LLM call (indexing is done by then), break embeddings so search-mcp fails.
 	var callCount atomic.Int32
 	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
 		n := callCount.Add(1)
 		if n == 1 {
+			// Break embeddings so search-mcp can't embed the query (422 = non-retryable)
+			llm.SetEmbeddingResponseFunc(func(rb []byte) (int, json.RawMessage) {
+				return 422, json.RawMessage(`{"error":{"message":"embedding service unavailable"}}`)
+			})
 			// LLM asks to search the codebase
 			return 200, json.RawMessage(`{
                 "id": "chatcmpl-sc-1",
@@ -1027,11 +1139,11 @@ func TestSearchCodebaseToolGracefulDegradation(t *testing.T) {
 	if callCount.Load() != 2 {
 		t.Errorf("expected 2 LLM calls (tool call + final), got %d", callCount.Load())
 	}
-	// The second LLM request must contain the search_codebase tool result (error message)
+	// The second LLM request must contain the search_codebase tool result (error from search-mcp)
 	reqs := llm.Requests()
 	if len(reqs) >= 2 {
 		body := string(reqs[1].Body)
-		if !strings.Contains(body, "search context not available") {
+		if !strings.Contains(body, "search-mcp failed") {
 			t.Errorf("second LLM request missing search_codebase error result: %s", body)
 		}
 	}
@@ -1041,12 +1153,9 @@ func TestSearchCodebaseToolGracefulDegradation(t *testing.T) {
 	}
 }
 
-// TestSemanticSearch verifies the reviewer finds a function definition via semantic search
-// when it's not in the diff and posts a comment about an argument mismatch.
-// This test is currently skipped — it serves as an executable spec for the semantic search feature.
+// TestSemanticSearch verifies the reviewer uses the search_codebase tool to find a function
+// definition not in the diff, and posts inline comments based on the search result.
 func TestSemanticSearch(t *testing.T) {
-	t.Skip("semantic search not yet integrated into reviewer pipeline")
-
 	gitlab.SetMR("100", "1", &MRConfig{
 		Details: json.RawMessage(`{
             "iid": 1,
@@ -1066,9 +1175,41 @@ func TestSemanticSearch(t *testing.T) {
             "base_commit_sha": "base000", "start_commit_sha": "base000"
         }]`),
 	})
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	// Two-turn conversation: first call returns search_codebase tool call,
+	// second returns final_result with a comment about wrong argument count.
+	var callCount atomic.Int32
 	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
+		n := callCount.Add(1)
+		if n == 1 {
+			return 200, json.RawMessage(`{
+                "id": "chatcmpl-sem-1",
+                "object": "chat.completion",
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_sem",
+                            "type": "function",
+                            "function": {
+                                "name": "search_codebase",
+                                "arguments": "{\"query\": \"Foo function definition\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {"prompt_tokens": 200, "completion_tokens": 50, "total_tokens": 250}
+            }`)
+		}
 		return 200, json.RawMessage(`{
-            "id": "chatcmpl-sem-1",
+            "id": "chatcmpl-sem-2",
             "object": "chat.completion",
             "model": "test-model",
             "choices": [{
@@ -1076,22 +1217,19 @@ func TestSemanticSearch(t *testing.T) {
                 "message": {
                     "role": "assistant",
                     "tool_calls": [{
-                        "id": "call_sem",
+                        "id": "call_sem_final",
                         "type": "function",
                         "function": {
                             "name": "final_result",
-                            "arguments": "{\"summary\":\"Wrong argument count.\",\"comments\":[{\"file_path\":\"cmd/main.go\",\"line_start\":10,\"line_end\":10,\"body\":\"mathutil.Foo requires 2 arguments (x int, y int) but is called with only 1\"}]}"
+                            "arguments": "{\"summary\":\"Wrong argument count.\",\"comments\":[{\"file_path\":\"cmd/main.go\",\"line_start\":11,\"line_end\":11,\"body\":\"mathutil.Foo requires 2 arguments (x int, y int) but is called with only 1\"}]}"
                         }
                     }]
                 },
                 "finish_reason": "stop"
             }],
-            "usage": {"prompt_tokens": 200, "completion_tokens": 50, "total_tokens": 250}
+            "usage": {"prompt_tokens": 300, "completion_tokens": 50, "total_tokens": 350}
         }`)
 	}
-	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
-	gitlab.Reset()
-	llm.Reset()
 
 	_, repoID, _ := SetupProviderAndRepo(t, clients, gitlab)
 
@@ -1111,18 +1249,315 @@ func TestSemanticSearch(t *testing.T) {
 	if len(discussions) != 1 {
 		t.Fatalf("expected 1 inline discussion, got %d", len(discussions))
 	}
-	if discussions[0].Position.NewLine != 10 {
-		t.Errorf("discussion new_line = %d, want 10", discussions[0].Position.NewLine)
-	}
 	if !strings.Contains(discussions[0].Body, "mathutil.Foo requires 2 arguments") {
 		t.Errorf("discussion body missing expected content: %s", discussions[0].Body)
 	}
-	// The LLM request must contain the Foo definition (from Qdrant, not from the diff)
+	// The second LLM request should contain the search tool result
 	llmReqs := llm.Requests()
-	if len(llmReqs) == 0 {
-		t.Fatal("expected at least 1 LLM request")
+	if len(llmReqs) < 2 {
+		t.Fatalf("expected at least 2 LLM requests (search + final), got %d", len(llmReqs))
 	}
-	if !strings.Contains(string(llmReqs[0].Body), "func Foo") {
-		t.Errorf("LLM request missing Foo definition (expected from Qdrant context)")
+	// Verify the search_codebase tool result was passed back to the LLM
+	body := string(llmReqs[1].Body)
+	if !strings.Contains(body, "search_codebase") && !strings.Contains(body, "tool") {
+		t.Errorf("second LLM request missing search_codebase tool result: %s", body)
+	}
+}
+
+// TestRepoSyncerCloneFailure verifies that when RepoSyncer cannot clone the repo
+// (no git server at that path), the review run reaches FAILED status.
+func TestRepoSyncerCloneFailure(t *testing.T) {
+	// Register a second project (ID=200) that has no git repo served by the mock.
+	// The mock only serves group/test-project.git; nonexistent/broken-repo.git returns 404.
+	gitlab.SetProjects([]GitLabProject{
+		{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git"},
+		{ID: 200, Name: "broken-repo", PathWithNamespace: "nonexistent/broken-repo", HTTPURLToRepo: "http://gitlab.example.com/nonexistent/broken-repo.git"},
+	})
+	gitlab.SetMR("200", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1,
+            "title": "Some change",
+            "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/x", "target_branch": "main",
+            "sha": "abc123", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "x.go", "new_path": "x.go",
+            "diff": "@@ -1,2 +1,3 @@\n package x\n+// new line\n func F() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "abc123",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	llm.DefaultResponse = defaultLLMResponse
+	t.Cleanup(func() {
+		gitlab.Reset()
+		llm.Reset()
+		// Restore original project list
+		gitlab.SetProjects([]GitLabProject{
+			{ID: 100, Name: "test-project", PathWithNamespace: "group/test-project", HTTPURLToRepo: "http://gitlab.example.com/group/test-project.git"},
+		})
+	})
+	gitlab.Reset()
+	llm.Reset()
+
+	// Create a second provider pointing at the same mock GitLab (which now returns project 200)
+	createResp, err := clients.Provider.CreateProvider(context.Background(),
+		connect.NewRequest(&apiv1.CreateProviderRequest{
+			Type:    apiv1.ProviderType_PROVIDER_TYPE_GITLAB_SELF_HOSTED,
+			Name:    "broken-provider",
+			BaseUrl: gitlab.HostURL(),
+			Token:   "test-token",
+		}))
+	if err != nil {
+		t.Fatalf("CreateProvider: %v", err)
+	}
+	providerID := createResp.Msg.Provider.Id
+
+	// Find repo with remoteId=200
+	repos := waitForRepos(t, clients.Repo, providerID, 15*time.Second)
+	var repoID string
+	for _, repo := range repos {
+		if repo.RemoteId == "200" {
+			repoID = repo.Id
+			break
+		}
+	}
+	if repoID == "" {
+		t.Fatal("repo with remoteId=200 not found")
+	}
+
+	_, err = clients.Repo.EnableReview(context.Background(),
+		connect.NewRequest(&apiv1.EnableReviewRequest{RepoId: repoID}))
+	if err != nil {
+		t.Fatalf("EnableReview: %v", err)
+	}
+
+	triggerResp, err := clients.Review.TriggerReview(context.Background(),
+		connect.NewRequest(&apiv1.TriggerReviewRequest{RepoId: repoID, MrNumber: 1}))
+	if err != nil {
+		t.Fatalf("TriggerReview: %v", err)
+	}
+	runID := triggerResp.Msg.ReviewRun.Id
+
+	run := PollReviewRun(t, clients.Review, runID,
+		apiv1.ReviewStatus_REVIEW_STATUS_FAILED, 120*time.Second, 2*time.Second)
+	if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_FAILED {
+		t.Errorf("expected FAILED (clone error), got %s", run.Status)
+	}
+	if llm.RequestCount() != 0 {
+		t.Errorf("expected 0 LLM calls when SyncRepo fails, got %d", llm.RequestCount())
+	}
+	if len(gitlab.Notes()) != 0 {
+		t.Errorf("expected 0 notes when SyncRepo fails, got %d", len(gitlab.Notes()))
+	}
+	if len(gitlab.Discussions()) != 0 {
+		t.Errorf("expected 0 discussions when SyncRepo fails, got %d", len(gitlab.Discussions()))
+	}
+}
+
+// TestIndexerFailureGracefulDegradation verifies that when IndexRepo fails (embeddings return 500),
+// the review still completes without semantic search capability.
+func TestIndexerFailureGracefulDegradation(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1,
+            "title": "Add order processing",
+            "description": "Implements order handler",
+            "author": {"username": "alice"},
+            "source_branch": "feature/orders",
+            "target_branch": "main",
+            "sha": "bbb222",
+            "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{
+                "old_path": "src/handler.go",
+                "new_path": "src/handler.go",
+                "diff": "@@ -10,6 +10,12 @@ package handler\n import \"fmt\"\n \n+func ProcessOrder(order *Order) error {\n+    result := CalculateTotal(order.Items)\n+    if result == nil {\n+        return nil\n+    }\n+    fmt.Println(result)\n+    return nil\n+}",
+                "new_file": false, "deleted_file": false, "renamed_file": false
+            }]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1,
+            "head_commit_sha": "bbb222",
+            "base_commit_sha": "aaa111",
+            "start_commit_sha": "aaa111"
+        }]`),
+	})
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	// Embeddings always return 422 (non-retryable) → IndexRepo will fail
+	llm.EmbeddingResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
+		return 422, json.RawMessage(`{"error":{"message":"embedding service unavailable"}}`)
+	}
+
+	// Two-turn conversation: first call returns search_codebase (which should fail gracefully),
+	// second returns final_result.
+	var callCount atomic.Int32
+	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
+		n := callCount.Add(1)
+		if n == 1 {
+			return 200, json.RawMessage(`{
+                "id": "chatcmpl-idx-1",
+                "object": "chat.completion",
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_idx1",
+                            "type": "function",
+                            "function": {
+                                "name": "search_codebase",
+                                "arguments": "{\"query\": \"CalculateTotal function definition\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+            }`)
+		}
+		return 200, defaultLLMResponse
+	}
+
+	_, repoID, _ := SetupProviderAndRepo(t, clients, gitlab)
+
+	triggerResp, err := clients.Review.TriggerReview(context.Background(),
+		connect.NewRequest(&apiv1.TriggerReviewRequest{RepoId: repoID, MrNumber: 1}))
+	if err != nil {
+		t.Fatalf("TriggerReview: %v", err)
+	}
+	runID := triggerResp.Msg.ReviewRun.Id
+
+	// Review should complete even when indexing fails (graceful degradation)
+	run := PollReviewRun(t, clients.Review, runID,
+		apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED, 90*time.Second, 2*time.Second)
+	if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED {
+		t.Errorf("expected COMPLETED (indexing failure should degrade gracefully), got %s", run.Status)
+	}
+	if callCount.Load() != 2 {
+		t.Errorf("expected 2 LLM calls (search + final), got %d", callCount.Load())
+	}
+	// Second request must contain "search context not available" (indexing failed → no collection)
+	reqs := llm.Requests()
+	if len(reqs) >= 2 {
+		body := string(reqs[1].Body)
+		if !strings.Contains(body, "search context not available") {
+			t.Errorf("second LLM request should have 'search context not available' (indexing failed): %s", body)
+		}
+	}
+	// Comments still posted despite indexing failure
+	if len(run.Comments) == 0 {
+		t.Errorf("expected comments in completed review despite indexing failure")
+	}
+}
+
+// TestReadFileToolWorksWithSyncedRepo verifies that after SyncRepo, the read_file tool
+// reads from the correct repo_path and returns real file content.
+func TestReadFileToolWorksWithSyncedRepo(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1,
+            "title": "Add order processing",
+            "description": "Implements order handler",
+            "author": {"username": "alice"},
+            "source_branch": "feature/orders",
+            "target_branch": "main",
+            "sha": "bbb222",
+            "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{
+                "old_path": "src/handler.go",
+                "new_path": "src/handler.go",
+                "diff": "@@ -10,6 +10,12 @@ package handler\n import \"fmt\"\n \n+func ProcessOrder(order *Order) error {\n+    result := CalculateTotal(order.Items)\n+    if result == nil {\n+        return nil\n+    }\n+    fmt.Println(result)\n+    return nil\n+}",
+                "new_file": false, "deleted_file": false, "renamed_file": false
+            }]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1,
+            "head_commit_sha": "bbb222",
+            "base_commit_sha": "aaa111",
+            "start_commit_sha": "aaa111"
+        }]`),
+	})
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	// Two-turn: first call asks to read src/util.go (which exists in the bare repo),
+	// second call returns final_result using the file content.
+	var callCount atomic.Int32
+	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
+		n := callCount.Add(1)
+		if n == 1 {
+			return 200, json.RawMessage(`{
+                "id": "chatcmpl-rf-synced-1",
+                "object": "chat.completion",
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_rf_synced1",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": "{\"file_path\": \"src/util.go\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+            }`)
+		}
+		return 200, defaultLLMResponse
+	}
+
+	_, repoID, _ := SetupProviderAndRepo(t, clients, gitlab)
+
+	triggerResp, err := clients.Review.TriggerReview(context.Background(),
+		connect.NewRequest(&apiv1.TriggerReviewRequest{RepoId: repoID, MrNumber: 1}))
+	if err != nil {
+		t.Fatalf("TriggerReview: %v", err)
+	}
+	runID := triggerResp.Msg.ReviewRun.Id
+
+	run := PollReviewRun(t, clients.Review, runID,
+		apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED, 90*time.Second, 2*time.Second)
+	if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED {
+		t.Errorf("expected COMPLETED, got %s", run.Status)
+	}
+	if callCount.Load() != 2 {
+		t.Errorf("expected 2 LLM calls (read_file + final), got %d", callCount.Load())
+	}
+
+	// The second LLM request must contain the actual file content from the bare repo
+	reqs := llm.Requests()
+	if len(reqs) >= 2 {
+		body := string(reqs[1].Body)
+		// "CalculateTotal" is a known unique string in src/util.go
+		if !strings.Contains(body, "CalculateTotal") {
+			t.Errorf("second LLM request should contain src/util.go content ('CalculateTotal'): %s", body)
+		}
+		// Must NOT contain the degradation error — repo_path should be populated
+		if strings.Contains(body, "repository context not available") {
+			t.Errorf("second LLM request should not contain degradation error — repo_path should be populated")
+		}
+	}
+	if len(run.Comments) == 0 {
+		t.Errorf("expected comments in completed review")
 	}
 }

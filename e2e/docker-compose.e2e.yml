@@ -13,6 +13,16 @@ services:
   api-server:
     extra_hosts:
       - "host.docker.internal:host-gateway"
+  indexer:
+    environment:
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  search-mcp:
+    environment:
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   restate-e2e-data:

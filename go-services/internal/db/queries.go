@@ -171,3 +171,30 @@ func UpdateReviewRunDiffHash(ctx context.Context, pool *pgxpool.Pool, runID, dif
 	}
 	return nil
 }
+
+// GetBranchIndex returns the last indexed commit and collection name for a repo+branch.
+// Returns ("", "", false, nil) if no index record exists.
+func GetBranchIndex(ctx context.Context, pool *pgxpool.Pool, repoID, branch string) (lastIndexedCommit, collectionName string, found bool, err error) {
+	const q = `SELECT last_indexed_commit, collection_name FROM branch_indexes WHERE repo_id = $1 AND branch = $2`
+	err = pool.QueryRow(ctx, q, repoID, branch).Scan(&lastIndexedCommit, &collectionName)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", "", false, nil
+		}
+		return "", "", false, fmt.Errorf("GetBranchIndex: %w", err)
+	}
+	return lastIndexedCommit, collectionName, true, nil
+}
+
+// UpsertBranchIndex upserts a branch_indexes row after successful indexing.
+func UpsertBranchIndex(ctx context.Context, pool *pgxpool.Pool, repoID, branch, lastIndexedCommit, collectionName string) error {
+	const q = `
+		INSERT INTO branch_indexes (repo_id, branch, last_indexed_commit, collection_name)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (repo_id, branch) DO UPDATE
+		SET last_indexed_commit = $3, collection_name = $4, updated_at = now()`
+	if _, err := pool.Exec(ctx, q, repoID, branch, lastIndexedCommit, collectionName); err != nil {
+		return fmt.Errorf("UpsertBranchIndex: %w", err)
+	}
+	return nil
+}

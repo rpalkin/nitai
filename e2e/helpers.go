@@ -251,14 +251,16 @@ func waitForHTTP(t testingT, url string, timeout time.Duration) {
 	t.Fatalf("timed out waiting for %s to return 200", url)
 }
 
-// waitForRestateServices polls the Restate admin API until DiffFetcher, PostReview,
-// PRReview, and Reviewer are all registered, or the timeout expires.
+// waitForRestateServices polls the Restate admin API until all required services
+// are registered, or the timeout expires.
 func waitForRestateServices(t testingT, adminURL string, timeout time.Duration) {
 	required := map[string]bool{
 		"DiffFetcher": false,
 		"PostReview":  false,
 		"PRReview":    false,
 		"Reviewer":    false,
+		"RepoSyncer":  false,
+		"Indexer":     false,
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

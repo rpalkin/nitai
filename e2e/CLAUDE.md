@@ -73,3 +73,26 @@ Each test case should:
 - Webhook-triggered reviews create **two** DB runs: one by the webhook handler (holds `restate_invocation_id`), one by the PRReview worker (goes through the pipeline). `WaitForReviewRun` finds the worker's run by status.
 - `llm.Reset()` clears both requests and `ResponseFunc`. Always set `ResponseFunc` **after** the initial `llm.Reset()` call in test setup.
 - Test 9 (`TestDuplicateDiffDedup`) completes in ~2s. The debounce timer only fires for cancelled invocations; after a normal completion it is skipped.
+
+## Current test cases (18 tests)
+
+| Test | Description |
+|---|---|
+| `TestFullPipelineViaTriggerReview` | End-to-end via API trigger. Asserts LLM receives `read_file` and `search_codebase` tools. |
+| `TestFullPipelineViaWebhook` | End-to-end via webhook MR event. |
+| `TestInvalidWebhookSecret` | Webhook with wrong token returns 401. |
+| `TestUnknownRepoWebhook` | Webhook for unknown project returns 200 (no dispatch). |
+| `TestDraftMRNoReview` | Draft MR creates `status=draft` row, no Restate invocation. |
+| `TestDraftToReadyTransition` | Draft → ready webhook triggers review. |
+| `TestReviewDisabledRepo` | Webhook for disabled repo is ignored. |
+| `TestLargeDiffShortCircuit` | Diff over 5000 lines posts "too large" comment. |
+| `TestDuplicateDiffDedup` | Same HeadSHA → second review is skipped. |
+| `TestProviderDeletionCascade` | Soft-deleted provider's repos are not returned. |
+| `TestLLMTerminalError` | LLM 4xx → review fails (non-retryable). |
+| `TestGitLab404ForMR` | GitLab 404 for MR → review fails. |
+| `TestReadFileToolGracefulDegradation` | LLM calls `read_file` without repo context → gets error → review still completes. |
+| `TestSearchCodebaseToolGracefulDegradation` | LLM calls `search_codebase` without collection → gets error → review completes. |
+| `TestSemanticSearch` | Full pipeline with SyncRepo + IndexRepo + search-MCP wired. |
+| `TestRepoSyncerCloneFailure` | SyncRepo fails → review marked failed. |
+| `TestIndexerFailureGracefulDegradation` | IndexRepo fails → review proceeds without search. |
+| `TestReadFileToolWorksWithSyncedRepo` | File reader tool works against a synced bare clone. |

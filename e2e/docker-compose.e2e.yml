@@ -5,6 +5,7 @@ services:
   reviewer:
     environment:
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL}
+      LOG_LEVEL: DEBUG
     extra_hosts:
       - "host.docker.internal:host-gateway"
   worker:

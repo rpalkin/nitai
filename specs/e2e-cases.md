@@ -236,7 +236,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test 13 — Semantic search: wrong function call detected [SKIP] ⚠️ spec [DONE]
+### Test 13 — Semantic search: wrong function call detected [DONE]
 **Purpose:** Verify the reviewer finds a function definition via semantic search when it's not in the diff, and posts a comment about the argument mismatch.
 
 **Status:** `t.Skip("semantic search not yet integrated into reviewer pipeline")` — this test is the executable spec for the feature.
@@ -268,7 +268,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ## Cases A–O (Product Review Gaps)
 
-### Test A — Disable review → subsequent webhook ignored ✅/🔴 lifecycle
+### Test A — Disable review → subsequent webhook ignored ✅/🔴 lifecycle [DONE]
 **Purpose:** Tests the review toggle lifecycle end-to-end (not just initial state).
 
 **Steps:**
@@ -284,7 +284,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test B — Re-review on new push (same MR, different diff) ✅ green
+### Test B — Re-review on new push (same MR, different diff) ✅ green [DONE]
 **Purpose:** Verify a new push to an existing MR triggers a new review. The primary developer workflow.
 
 **Steps:**
@@ -301,7 +301,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test C — Cancel-on-new-push: in-flight review superseded ✅ green
+### Test C — Cancel-on-new-push: in-flight review superseded ✅ green [DONE]
 **Purpose:** Verify that a new push while a review is in-flight cancels the first and runs only the second.
 
 **Steps:**
@@ -318,7 +318,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test D — Concurrent reviews on different MRs (same repo) ✅ green
+### Test D — Concurrent reviews on different MRs (same repo) ✅ green [DONE]
 **Purpose:** Verify two MRs on the same repo are reviewed independently without interference.
 
 **Steps:**
@@ -352,7 +352,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test F — Review produces zero inline comments (clean diff) ✅ green
+### Test F — Review produces zero inline comments (clean diff) ✅ green [DONE]
 **Purpose:** Verify a clean diff (no issues found) completes successfully without hanging.
 
 **Pre-conditions:** Mock LLM returns `ReviewResponse` with non-empty summary but empty `comments: []`.
@@ -370,7 +370,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test G — Invalid/expired token at review time 🔴 red
+### Test G — Invalid/expired token at review time 🔴 red [DONE]
 **Purpose:** Verify graceful failure when provider token is invalid at the time of review.
 
 **Pre-conditions:** Mock GitLab configured to return HTTP 401 for authenticated API calls.
@@ -389,7 +389,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test H — Webhook for closed/merged MR is ignored 🔴 red
+### Test H — Webhook for closed/merged MR is ignored 🔴 red [DONE]
 **Purpose:** Verify `close` and `merge` webhook actions produce no review run.
 
 **Webhook payloads:**
@@ -405,7 +405,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test I — Debounce collapses rapid pushes (timing test) ✅ green
+### Test I — Debounce collapses rapid pushes (timing test) ✅ green [DONE]
 **Purpose:** Verify two rapid webhooks for the same MR (different diff hashes) produce only one review.
 
 **Note:** Distinct from Test 9 (same diff hash). This tests the debounce timer collapsing rapid sequential pushes, not hash-based dedup.
@@ -469,7 +469,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test M — Malformed JSON webhook body → no 500 🔴 red
+### Test M — Malformed JSON webhook body → no 500 🔴 red [DONE]
 **Purpose:** Verify garbage webhook body is handled gracefully.
 
 **Steps:**
@@ -482,7 +482,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 ---
 
-### Test N — Large number of inline comments ✅ green
+### Test N — Large number of inline comments ✅ green [DONE]
 **Purpose:** Verify 50+ inline comments are all posted without rate-limit or timeout failures.
 
 **Pre-conditions:** Mock LLM returns `ReviewResponse` with 50 inline comments across different files and lines.
@@ -531,6 +531,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 | Implementation | Count |
 |---|---|
-| [DONE] Implemented (passing) | 12 (Tests 1–12) |
-| [DONE] Implemented (t.Skip) | 1 (Test 13) |
-| Not yet implemented | 15 (Tests A–O) |
+| [DONE] Implemented (passing) | 23 (Tests 1–13, A–D, F–I, M, N) |
+| Not yet implemented | 5 (Tests E, J, K, L, O) |
+
+**Note:** Tests J (TestRepoSyncerCloneFailure) and K (covered by TestFullPipelineViaTriggerReview) were already implemented earlier. Tests E, L, O are skipped (complex or low marginal value).

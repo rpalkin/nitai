@@ -28,11 +28,12 @@ const e2eDBURL = "postgres://ai_reviewer:ai_reviewer@localhost:5432/ai_reviewer?
 
 // DBReviewRun holds minimal review_run data for direct DB queries.
 type DBReviewRun struct {
-	ID       string
-	RepoID   string
-	MRNumber int64
-	Status   string
-	DiffHash string
+	ID                  string
+	RepoID              string
+	MRNumber            int64
+	Status              string
+	DiffHash            string
+	RestateInvocationID *string
 }
 
 // QueryReviewRuns returns all review_runs for the given (repoID, mrNumber), ordered by created_at.
@@ -45,7 +46,7 @@ func QueryReviewRuns(t *testing.T, repoID string, mrNumber int64) []DBReviewRun 
 	defer conn.Close(context.Background())
 
 	rows, err := conn.Query(context.Background(),
-		`SELECT id, repo_id, mr_number, status, COALESCE(diff_hash, '')
+		`SELECT id, repo_id, mr_number, status, COALESCE(diff_hash, ''), restate_invocation_id
 		 FROM review_runs
 		 WHERE repo_id = $1 AND mr_number = $2
 		 ORDER BY created_at`,
@@ -58,7 +59,7 @@ func QueryReviewRuns(t *testing.T, repoID string, mrNumber int64) []DBReviewRun 
 	var result []DBReviewRun
 	for rows.Next() {
 		var r DBReviewRun
-		if err := rows.Scan(&r.ID, &r.RepoID, &r.MRNumber, &r.Status, &r.DiffHash); err != nil {
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.MRNumber, &r.Status, &r.DiffHash, &r.RestateInvocationID); err != nil {
 			t.Fatalf("QueryReviewRuns: scan: %v", err)
 		}
 		result = append(result, r)
@@ -318,11 +319,11 @@ func waitForRepos(t *testing.T, client apiv1connect.RepoServiceClient, providerI
 }
 
 type E2EStack struct {
-	Compose      tc.ComposeStack
-	GitLab       *GitLabMock
-	LLM          *LLMMock
-	Clients      *TestClients
-	createdEnv   bool // true if we created ../.env and should remove it on teardown
+	Compose    tc.ComposeStack
+	GitLab     *GitLabMock
+	LLM        *LLMMock
+	Clients    *TestClients
+	createdEnv bool // true if we created ../.env and should remove it on teardown
 }
 
 func StartStack(t testingT, gitlabMock *GitLabMock, llmMock *LLMMock) *E2EStack {

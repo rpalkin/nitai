@@ -3,13 +3,13 @@ package indexmainbranch
 import (
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	restate "github.com/restatedev/sdk-go"
 
 	"ai-reviewer/go-services/internal/db"
+	"ai-reviewer/go-services/internal/indexing"
 	"ai-reviewer/go-services/internal/reposyncer"
 )
 
@@ -27,29 +27,6 @@ func New(pool *pgxpool.Pool) *IndexMainBranch {
 // RunRequest is the input for Run.
 type RunRequest struct {
 	RepoID string `json:"repo_id"`
-}
-
-// indexRequest is the payload sent to the Python Indexer service.
-type indexRequest struct {
-	RepoID            string  `json:"repo_id"`
-	RepoPath          string  `json:"repo_path"`
-	Branch            string  `json:"branch"`
-	HeadSHA           string  `json:"head_sha"`
-	CollectionName    string  `json:"collection_name"`
-	LastIndexedCommit *string `json:"last_indexed_commit"`
-}
-
-// indexResult is the response from the Python Indexer service.
-type indexResult struct {
-	CollectionName string `json:"collection_name"`
-	FilesIndexed   int    `json:"files_indexed"`
-	ChunksUpserted int    `json:"chunks_upserted"`
-}
-
-// sanitizeCollectionName returns a Qdrant-safe collection name for a repo+branch.
-func sanitizeCollectionName(repoID, branch string) string {
-	safe := strings.NewReplacer("/", "_", "-", "_", ".", "_").Replace(branch)
-	return repoID + "_" + safe
 }
 
 const rescheduleDelay = 6 * time.Hour
@@ -72,7 +49,8 @@ func (s *IndexMainBranch) Run(ctx restate.ObjectContext, req RunRequest) (restat
 		defaultBranch = "main"
 	}
 
-	// Always reschedule, even on failure.
+	// Reschedule next run on successful completion.
+	// Note: Early returns above (disabled review, up-to-date index) skip this defer.
 	defer func() {
 		restate.ObjectSend(ctx, "IndexMainBranch", req.RepoID, "Run").
 			Send(RunRequest{RepoID: req.RepoID}, restate.WithDelay(rescheduleDelay))
@@ -90,7 +68,7 @@ func (s *IndexMainBranch) Run(ctx restate.ObjectContext, req RunRequest) (restat
 	}
 
 	// Step 2: Check if index is up to date.
-	collectionName := sanitizeCollectionName(req.RepoID, defaultBranch)
+	collectionName := indexing.SanitizeCollectionName(req.RepoID, defaultBranch)
 	lastCommit, storedCollection, found, err := db.GetBranchIndex(ctx, s.pool, req.RepoID, defaultBranch)
 	if err != nil {
 		log.Printf("IndexMainBranch: reading branch index: %v", err)
@@ -106,8 +84,8 @@ func (s *IndexMainBranch) Run(ctx restate.ObjectContext, req RunRequest) (restat
 	if found {
 		lastCommitPtr = &lastCommit
 	}
-	idxResult, err := restate.Service[indexResult](ctx, "Indexer", "IndexRepo").
-		Request(indexRequest{
+	idxResult, err := restate.Service[indexing.IndexResult](ctx, "Indexer", "IndexRepo").
+		Request(indexing.IndexRequest{
 			RepoID:            req.RepoID,
 			RepoPath:          syncResult.RepoPath,
 			Branch:            defaultBranch,

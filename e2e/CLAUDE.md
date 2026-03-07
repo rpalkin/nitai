@@ -10,6 +10,8 @@ All test files use `//go:build e2e`. Tests are excluded from normal `go test ./.
 
 ```bash
 # From repo root (requires Docker):
+# IMPORTANT: Always run docker compose down first to ensure clean state:
+docker compose -p e2e down -v
 make e2e
 
 # Equivalent direct command:
@@ -17,6 +19,19 @@ cd e2e && GOWORK=off go test -v -tags e2e -count=1 -timeout 300s ./...
 
 # Live mode (real GitLab, real LLM):
 E2E_LIVE=1 GITLAB_URL=... GITLAB_TOKEN=... make e2e
+
+# Run specific test(s) by name (accepts Go regex pattern, e.g., TEST_INCLUDE="TestCancel|TestDebounce"):
+TEST_INCLUDE=TestCancelOnNewPush make e2e
+
+# Run multiple tests matching a pattern:
+TEST_INCLUDE="TestFullPipeline|TestSemantic" make e2e
+
+# If tests fail, the Docker stack is NOT torn down (for debugging):
+# Check logs: docker compose -p e2e logs -f
+# Clean up manually when done: docker compose -p e2e down -v
+
+# To force cleanup even on failure, run manually:
+# cd e2e && E2E_KEEP_STACK=0 GOWORK=off go test -v -tags e2e ./...
 
 # Rebuild Docker images after code changes (MUST use -p e2e to match testcontainers project name):
 docker compose -p e2e build api-server worker
@@ -51,7 +66,7 @@ docker compose -p e2e build api-server worker
 
 ## Adding test cases
 
-See `specs/e2e-cases.md` for the full list of planned test cases (28 total).
+See `specs/e2e-cases.md` for the full list of test cases (29 implemented, 5 skipped).
 
 Each test case should:
 1. Configure the mock servers for the scenario (e.g., specific MR diff, draft status)
@@ -70,11 +85,11 @@ Each test case should:
 ### Review status notes
 
 - `draft` and `skipped` DB statuses map to `REVIEW_STATUS_UNSPECIFIED` in the proto API — use `WaitForReviewRun` for these
-- Webhook-triggered reviews create **two** DB runs: one by the webhook handler (holds `restate_invocation_id`), one by the PRReview worker (goes through the pipeline). `WaitForReviewRun` finds the worker's run by status.
+- Webhook-triggered reviews create **one** DB run: the webhook handler creates the run with the invocation ID, and the PRReview worker updates it as it progresses through the pipeline. `WaitForReviewRun` finds the worker's run by status.
 - `llm.Reset()` clears both requests and `ResponseFunc`. Always set `ResponseFunc` **after** the initial `llm.Reset()` call in test setup.
 - Test 9 (`TestDuplicateDiffDedup`) completes in ~2s. The debounce timer only fires for cancelled invocations; after a normal completion it is skipped.
 
-## Current test cases (18 tests)
+## Current test cases (28 tests)
 
 | Test | Description |
 |---|---|
@@ -96,3 +111,16 @@ Each test case should:
 | `TestRepoSyncerCloneFailure` | SyncRepo fails → review marked failed. |
 | `TestIndexerFailureGracefulDegradation` | IndexRepo fails → review proceeds without search. |
 | `TestReadFileToolWorksWithSyncedRepo` | File reader tool works against a synced bare clone. |
+| `TestDisableReviewStopsWebhook` | Enable → review → disable → second webhook ignored (spec A). |
+| `TestReReviewOnNewPush` | Same MR, different SHA → two completed reviews (spec B). |
+| `TestCancelOnNewPush` | Second webhook while review in-flight → only second completes after debounce (spec C). |
+| `TestConcurrentMRReviews` | Two different MRs reviewed independently in parallel (spec D). |
+| `TestZeroInlineComments` | Clean diff → summary posted, no discussions (spec F). |
+| `TestInvalidTokenAtReviewTime` | GitLab 401 at review time → FAILED (spec G). |
+| `TestClosedMergedMRIgnored` | action=close/merge → no review run (spec H). |
+| `TestDebounceRapidPushes` | Two rapid webhooks, different SHAs → one review after 3-min debounce (spec I). |
+| `TestSingleRunPerWebhookReview` | Webhook-triggered review creates exactly ONE run with invocation ID set (regression test). |
+| `TestMalformedWebhookBody` | Invalid JSON body → 4xx or 200, no review run (spec M). |
+| `TestManyInlineComments` | 50 inline comments all posted to GitLab (spec N). |
+
+**Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the 3-minute debounce and take ~4 min each. The suite timeout is 900s.

@@ -180,7 +180,10 @@ def _make_mock_client(call_tool_result=None, call_tool_side_effect=None):
     if call_tool_side_effect is not None:
         mock_client.call_tool = AsyncMock(side_effect=call_tool_side_effect)
     else:
-        mock_client.call_tool = AsyncMock(return_value=call_tool_result)
+        # Wrap the content list in an object with a .content attribute
+        mock_result = MagicMock()
+        mock_result.content = call_tool_result
+        mock_client.call_tool = AsyncMock(return_value=mock_result)
     return mock_client
 
 

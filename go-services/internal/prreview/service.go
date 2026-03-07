@@ -1,19 +1,36 @@
 package prreview
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
-	restate "github.com/restatedev/sdk-go"
 	"github.com/jackc/pgx/v5/pgxpool"
+	restate "github.com/restatedev/sdk-go"
 
 	"ai-reviewer/go-services/internal/db"
 	"ai-reviewer/go-services/internal/difffetcher"
+	"ai-reviewer/go-services/internal/indexing"
 	"ai-reviewer/go-services/internal/postreview"
 	"ai-reviewer/go-services/internal/reposyncer"
 )
+
+// isCancellationError checks if an error represents an invocation cancellation.
+// Cancellation errors should not update last_completed_at to allow debounce detection.
+func isCancellationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for context cancellation
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	// Check for specific Restate cancellation error codes
+	code := restate.ErrorCode(err)
+	return code == 409 || code == 499 // 409 = Cancelled, 499 = Client Closed Request
+}
 
 // PRReview is a Restate Virtual Object that orchestrates the full PR review pipeline.
 // It is keyed by "<repo_id>-<mr_number>" to ensure one active review per PR at a time.
@@ -37,13 +54,13 @@ type RunRequest struct {
 
 // reviewerInput is the payload sent to the Python Reviewer service.
 type reviewerInput struct {
-	Diff            string   `json:"diff"`
-	MRTitle         string   `json:"mr_title"`
-	MRDescription   string   `json:"mr_description"`
-	MRAuthor        string   `json:"mr_author"`
-	SourceBranch    string   `json:"source_branch"`
-	TargetBranch    string   `json:"target_branch"`
-	ChangedFiles    []string `json:"changed_files"`
+	Diff             string   `json:"diff"`
+	MRTitle          string   `json:"mr_title"`
+	MRDescription    string   `json:"mr_description"`
+	MRAuthor         string   `json:"mr_author"`
+	SourceBranch     string   `json:"source_branch"`
+	TargetBranch     string   `json:"target_branch"`
+	ChangedFiles     []string `json:"changed_files"`
 	RepoPath         string   `json:"repo_path,omitempty"`
 	TargetBranchSHA  string   `json:"target_branch_sha,omitempty"`
 	SearchCollection string   `json:"search_collection,omitempty"`
@@ -63,42 +80,24 @@ type reviewerOutput struct {
 	Comments []reviewComment `json:"comments"`
 }
 
-// indexRequest is the payload sent to the Python Indexer service.
-type indexRequest struct {
-	RepoID            string  `json:"repo_id"`
-	RepoPath          string  `json:"repo_path"`
-	Branch            string  `json:"branch"`
-	HeadSHA           string  `json:"head_sha"`
-	CollectionName    string  `json:"collection_name"`
-	LastIndexedCommit *string `json:"last_indexed_commit"`
-}
-
-// indexResult is the response from the Python Indexer service.
-type indexResult struct {
-	CollectionName string `json:"collection_name"`
-	FilesIndexed   int    `json:"files_indexed"`
-	ChunksUpserted int    `json:"chunks_upserted"`
-}
-
-// sanitizeCollectionName returns a Qdrant-safe collection name for a repo+branch.
-func sanitizeCollectionName(repoID, branch string) string {
-	safe := strings.NewReplacer("/", "_", "-", "_", ".", "_").Replace(branch)
-	return repoID + "_" + safe
-}
-
 // Run orchestrates the full PR review pipeline. Returns the review_run_id.
 func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult string, finalErr error) {
 	// Smart debounce: only delay when a recent invocation was cancelled (rapid push scenario).
 	// First trigger for an MR proceeds immediately. Completed invocations do not trigger debounce.
 	lastStarted, _ := restate.Get[int64](ctx, "last_started_at")
 	lastCompleted, _ := restate.Get[int64](ctx, "last_completed_at")
-	now := time.Now().UnixMilli()
+	now, err := restate.Run(ctx, func(restate.RunContext) (int64, error) {
+		return time.Now().UnixMilli(), nil
+	})
+	if err != nil {
+		return "", err
+	}
 	restate.Set(ctx, "last_started_at", now)
 
-	// Mark this invocation as completed when it exits successfully, so subsequent
-	// invocations can distinguish a normal completion from a cancellation.
+	// Mark this invocation as completed when it exits (success or error), so subsequent
+	// invocations can distinguish a completion from a cancellation. Only skip on cancellation.
 	defer func() {
-		if finalErr == nil {
+		if finalErr == nil || !isCancellationError(finalErr) {
 			restate.Set(ctx, "last_completed_at", now)
 		}
 	}()
@@ -123,7 +122,9 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 
 	// fail updates the run status to failed and propagates the error.
 	fail := func(err error) (string, error) {
-		_ = db.UpdateReviewRunStatus(ctx, p.pool, runID, "failed")
+		if dbErr := db.UpdateReviewRunStatus(ctx, p.pool, runID, "failed"); dbErr != nil {
+			log.Printf("PRReview: failed to update run status to failed: %v", dbErr)
+		}
 		return "", err
 	}
 
@@ -141,7 +142,9 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 	// Step 2: Guard against race where MR became a draft during debounce.
 	if fetchResp.Draft {
 		log.Printf("PRReview: MR %d is draft, skipping", req.MRNumber)
-		_ = db.UpdateReviewRunStatus(ctx, p.pool, runID, "draft")
+		if dbErr := db.UpdateReviewRunStatus(ctx, p.pool, runID, "draft"); dbErr != nil {
+			log.Printf("PRReview: failed to update run status to draft: %v", dbErr)
+		}
 		return runID, nil
 	}
 
@@ -196,7 +199,7 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 	}
 
 	// Step 8: Index the repository for semantic search (graceful degradation on failure).
-	collectionName := sanitizeCollectionName(req.RepoID, fetchResp.TargetBranch)
+	collectionName := indexing.SanitizeCollectionName(req.RepoID, fetchResp.TargetBranch)
 	lastCommit, storedCollection, found, err := db.GetBranchIndex(ctx, p.pool, req.RepoID, fetchResp.TargetBranch)
 	if err != nil {
 		log.Printf("PRReview: reading branch index: %v", err)
@@ -209,8 +212,8 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		if found {
 			lastCommitPtr = &lastCommit
 		}
-		idxResult, idxErr := restate.Service[indexResult](ctx, "Indexer", "IndexRepo").
-			Request(indexRequest{
+		idxResult, idxErr := restate.Service[indexing.IndexResult](ctx, "Indexer", "IndexRepo").
+			Request(indexing.IndexRequest{
 				RepoID:            req.RepoID,
 				RepoPath:          syncResult.RepoPath,
 				Branch:            fetchResp.TargetBranch,

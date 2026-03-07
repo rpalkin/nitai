@@ -3,9 +3,11 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,10 +51,15 @@ func TestMain(m *testing.M) {
 	// 5. Run tests
 	code := m.Run()
 
-	// 6. Teardown
-	StopStack(t0, stack)
-	gitlab.Server.Close()
-	llm.Server.Close()
+	// 6. Teardown (skip if tests failed to allow debugging)
+	if code != 0 {
+		t0.Logf("Tests failed with exit code %d. Keeping stack running for debugging.", code)
+		t0.Logf("To clean up manually: docker compose -p e2e down -v")
+	} else {
+		StopStack(t0, stack)
+		gitlab.Server.Close()
+		llm.Server.Close()
+	}
 
 	os.Exit(code)
 }
@@ -1559,5 +1566,872 @@ func TestReadFileToolWorksWithSyncedRepo(t *testing.T) {
 	}
 	if len(run.Comments) == 0 {
 		t.Errorf("expected comments in completed review")
+	}
+}
+
+// TestDisableReviewStopsWebhook verifies that disabling review stops new webhook-triggered reviews.
+func TestDisableReviewStopsWebhook(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Fix bug", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/fix", "target_branch": "main",
+            "sha": "disab111", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "fix.go", "new_path": "fix.go",
+            "diff": "@@ -1,2 +1,3 @@\n package main\n+// fix\n func F() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "disab111",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	llm.DefaultResponse = defaultLLMResponse
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	// First webhook → review completes
+	resp := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "open", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("first webhook: expected 200, got %d", resp.StatusCode)
+	}
+	WaitForReviewRun(t, repoID, 1, "completed", 90*time.Second)
+	if llm.RequestCount() != 1 {
+		t.Errorf("expected 1 LLM call after first webhook, got %d", llm.RequestCount())
+	}
+
+	// Record run count before disabling
+	runsAfterFirst := QueryReviewRuns(t, repoID, 1)
+
+	// Disable review
+	_, err := clients.Repo.DisableReview(context.Background(),
+		connect.NewRequest(&apiv1.DisableReviewRequest{RepoId: repoID}))
+	if err != nil {
+		t.Fatalf("DisableReview: %v", err)
+	}
+
+	// Second webhook — should be ignored since review is disabled
+	resp2 := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "update", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		t.Errorf("webhook after disable: expected 200, got %d", resp2.StatusCode)
+	}
+
+	time.Sleep(3 * time.Second)
+	if llm.RequestCount() != 1 {
+		t.Errorf("expected 1 total LLM call (second webhook ignored after disable), got %d", llm.RequestCount())
+	}
+	runsAfterSecond := QueryReviewRuns(t, repoID, 1)
+	if len(runsAfterSecond) != len(runsAfterFirst) {
+		t.Errorf("expected no new review runs after disable, got %d extra",
+			len(runsAfterSecond)-len(runsAfterFirst))
+	}
+}
+
+// TestReReviewOnNewPush verifies a new push to an existing MR triggers a fresh review.
+func TestReReviewOnNewPush(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Feature branch", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/x", "target_branch": "main",
+            "sha": "rerv1sha0", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "a.go", "new_path": "a.go",
+            "diff": "@@ -1,2 +1,3 @@\n package a\n+// push1\n func A() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "rerv1sha0",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	llm.DefaultResponse = defaultLLMResponse
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	// First webhook
+	resp := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "open", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp.Body.Close()
+	WaitForReviewRun(t, repoID, 1, "completed", 90*time.Second)
+	if llm.RequestCount() != 1 {
+		t.Errorf("expected 1 LLM call after first push, got %d", llm.RequestCount())
+	}
+
+	// Update MR to a new SHA (simulates new push with different changes)
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Feature branch", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/x", "target_branch": "main",
+            "sha": "rerv2sha0", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "a.go", "new_path": "a.go",
+            "diff": "@@ -1,2 +1,3 @@\n package a\n+// push2 changed content\n func A() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 2, "head_commit_sha": "rerv2sha0",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+
+	// Second webhook (new push, different SHA — no debounce since first completed normally)
+	resp2 := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "update", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp2.Body.Close()
+
+	// Wait for second completed run (no debounce since first completed normally)
+	t.Log("waiting for second completed run...")
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		runs := QueryReviewRuns(t, repoID, 1)
+		completedCount := 0
+		for _, r := range runs {
+			if r.Status == "completed" {
+				completedCount++
+			}
+		}
+		if completedCount >= 2 {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	runs := QueryReviewRuns(t, repoID, 1)
+	var completedRuns []DBReviewRun
+	for _, r := range runs {
+		if r.Status == "completed" {
+			completedRuns = append(completedRuns, r)
+		}
+	}
+	if len(completedRuns) != 2 {
+		t.Fatalf("expected 2 completed runs (one per push), got %d", len(completedRuns))
+	}
+	if completedRuns[0].DiffHash == completedRuns[1].DiffHash {
+		t.Errorf("expected different diff hashes for two different pushes, got same: %s", completedRuns[0].DiffHash)
+	}
+	if llm.RequestCount() != 2 {
+		t.Errorf("expected 2 LLM calls (one per push), got %d", llm.RequestCount())
+	}
+}
+
+// TestCancelOnNewPush verifies that a new webhook while a review is in-flight cancels the first
+// and only the second review completes (after 3-min debounce).
+func TestCancelOnNewPush(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Cancel test v1", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/cancel", "target_branch": "main",
+            "sha": "canc1v1s0", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "c.go", "new_path": "c.go",
+            "diff": "@@ -1,2 +1,3 @@\n package c\n+// cancel v1\n func C() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "canc1v1s0",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	// Block the first LLM response so the first review is in-flight when the second webhook arrives.
+	// The second webhook triggers Restate to cancel the first invocation and start a new one.
+	// After cancellation is triggered, we unblock the first LLM call - it should return normally,
+	// but the Reviewer should stop processing because Restate closed the connection.
+	unblockFirstLLM := make(chan struct{})
+	firstCallReturned := make(chan struct{})
+	var callCount atomic.Int32
+	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
+		n := callCount.Add(1)
+		if n == 1 {
+			// First call: block until we're ready to proceed
+			<-unblockFirstLLM
+			close(firstCallReturned)
+		}
+		// Always return normal 200 response - LLM doesn't know about cancellation
+		return 200, defaultLLMResponse
+	}
+
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	// Send first webhook
+	resp := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "open", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp.Body.Close()
+
+	// Poll until first LLM call received (first review is now in-flight, blocked at LLM)
+	t.Log("waiting for first LLM call (first review in-flight)...")
+	pollDeadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(pollDeadline) {
+		if llm.RequestCount() >= 1 {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if llm.RequestCount() < 1 {
+		close(unblockFirstLLM)
+		t.Fatal("first LLM call not received within 60s")
+	}
+	t.Log("first LLM call received; sending second webhook to trigger Restate cancellation")
+
+	// Update MR to new SHA and send second webhook (cancels first in-flight review)
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Cancel test v2", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/cancel", "target_branch": "main",
+            "sha": "canc1v2s0", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "c.go", "new_path": "c.go",
+            "diff": "@@ -1,2 +1,3 @@\n package c\n+// cancel v2 supersedes\n func C() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 2, "head_commit_sha": "canc1v2s0",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	resp2 := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "update", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp2.Body.Close()
+
+	// Unblock the first LLM call. Restate should have cancelled the first invocation by now,
+	// so even though the LLM returns 200, the Reviewer should not process the result.
+	close(unblockFirstLLM)
+
+	// Wait a moment for the first LLM call to complete
+	select {
+	case <-firstCallReturned:
+	case <-time.After(5 * time.Second):
+		t.Log("warning: first LLM call did not return within 5s")
+	}
+
+	// Wait for the second review to complete (after 3-min debounce + review pipeline).
+	WaitForReviewRun(t, repoID, 1, "completed", 300*time.Second)
+
+	// Only one review should have completed successfully.
+	// The first invocation was cancelled by Restate and should not complete.
+	runs := QueryReviewRuns(t, repoID, 1)
+	completedCount := 0
+	for _, r := range runs {
+		if r.Status == "completed" {
+			completedCount++
+		}
+	}
+	if completedCount != 1 {
+		t.Errorf("expected 1 completed run (first cancelled by Restate), got %d completed", completedCount)
+	}
+	// Two LLM calls expected: one for the first attempt (cancelled), one for the second (completed).
+	if llm.RequestCount() < 2 {
+		t.Errorf("expected at least 2 LLM calls (first cancelled + second completed), got %d", llm.RequestCount())
+	}
+}
+
+// TestSingleRunPerWebhookReview verifies that webhook-triggered reviews create exactly ONE run
+// with the correct restate_invocation_id set (regression test for double-run bug).
+func TestSingleRunPerWebhookReview(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Single run test", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/single", "target_branch": "main",
+            "sha": "singlerun1", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "single.go", "new_path": "single.go",
+            "diff": "@@ -1,2 +1,3 @@\n package single\n+// single run test\n func Single() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "singlerun1",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	llm.DefaultResponse = defaultLLMResponse
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	// Send webhook
+	resp := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "open", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp.Body.Close()
+
+	// Wait for review to complete
+	WaitForReviewRun(t, repoID, 1, "completed", 120*time.Second)
+
+	// Verify only ONE run was created
+	runs := QueryReviewRuns(t, repoID, 1)
+	if len(runs) != 1 {
+		t.Errorf("expected exactly 1 review run, got %d runs: %+v", len(runs), runs)
+	}
+
+	// Verify the run has restate_invocation_id set (not NULL)
+	if len(runs) > 0 {
+		run := runs[0]
+		if run.RestateInvocationID == nil || *run.RestateInvocationID == "" {
+			t.Errorf("expected run to have restate_invocation_id set, got nil or empty")
+		} else {
+			t.Logf("✓ Run has restate_invocation_id: %s", *run.RestateInvocationID)
+		}
+	}
+
+	t.Logf("✓ Webhook-triggered review created exactly 1 run with invocation ID")
+}
+
+// TestConcurrentMRReviews verifies two different MRs on the same repo are reviewed independently.
+func TestConcurrentMRReviews(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Feature A", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/a", "target_branch": "main",
+            "sha": "concsha10", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "a.go", "new_path": "a.go",
+            "diff": "@@ -1,2 +1,3 @@\n package a\n+// concurrent MR1\n func A() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "concsha10",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	gitlab.SetMR("100", "2", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 2, "title": "Feature B", "description": "",
+            "author": {"username": "bob"},
+            "source_branch": "feature/b", "target_branch": "main",
+            "sha": "concsha20", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "b.go", "new_path": "b.go",
+            "diff": "@@ -1,2 +1,3 @@\n package b\n+// concurrent MR2\n func B() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "concsha20",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	llm.DefaultResponse = defaultLLMResponse
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	// Send webhooks for both MRs near-simultaneously
+	resp1 := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "open", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp1.Body.Close()
+	resp2 := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 2, "action": "open", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp2.Body.Close()
+	if resp1.StatusCode != 200 || resp2.StatusCode != 200 {
+		t.Fatalf("webhook status: MR1=%d, MR2=%d (expected both 200)", resp1.StatusCode, resp2.StatusCode)
+	}
+
+	// Wait for both MRs to complete (they run in parallel in Restate)
+	t.Log("waiting for both MR reviews to complete concurrently...")
+	deadline := time.Now().Add(120 * time.Second)
+	for time.Now().Before(deadline) {
+		r1 := QueryReviewRuns(t, repoID, 1)
+		r2 := QueryReviewRuns(t, repoID, 2)
+		mr1Done, mr2Done := false, false
+		for _, r := range r1 {
+			if r.Status == "completed" {
+				mr1Done = true
+			}
+		}
+		for _, r := range r2 {
+			if r.Status == "completed" {
+				mr2Done = true
+			}
+		}
+		if mr1Done && mr2Done {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	r1 := QueryReviewRuns(t, repoID, 1)
+	r2 := QueryReviewRuns(t, repoID, 2)
+	mr1Completed, mr2Completed := false, false
+	for _, r := range r1 {
+		if r.Status == "completed" {
+			mr1Completed = true
+		}
+	}
+	for _, r := range r2 {
+		if r.Status == "completed" {
+			mr2Completed = true
+		}
+	}
+	if !mr1Completed {
+		t.Errorf("MR 1 review did not complete")
+	}
+	if !mr2Completed {
+		t.Errorf("MR 2 review did not complete")
+	}
+	if llm.RequestCount() != 2 {
+		t.Errorf("expected 2 LLM calls (one per MR), got %d", llm.RequestCount())
+	}
+
+	notes := gitlab.Notes()
+	if len(notes) != 2 {
+		t.Errorf("expected 2 summary notes (one per MR), got %d", len(notes))
+	}
+	discussions := gitlab.Discussions()
+	if len(discussions) != 4 {
+		t.Errorf("expected 4 discussions (2 per MR), got %d", len(discussions))
+	}
+
+	// Verify discussions are posted to the correct MR endpoints
+	mr1Discs, mr2Discs := 0, 0
+	for _, d := range discussions {
+		switch d.MRNumber {
+		case "1":
+			mr1Discs++
+		case "2":
+			mr2Discs++
+		}
+	}
+	if mr1Discs != 2 {
+		t.Errorf("expected 2 discussions for MR 1, got %d", mr1Discs)
+	}
+	if mr2Discs != 2 {
+		t.Errorf("expected 2 discussions for MR 2, got %d", mr2Discs)
+	}
+}
+
+// TestZeroInlineComments verifies a clean diff with no issues found completes successfully.
+func TestZeroInlineComments(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Clean change", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/clean", "target_branch": "main",
+            "sha": "zero1111", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "z.go", "new_path": "z.go",
+            "diff": "@@ -1,2 +1,3 @@\n package z\n+// clean code\n func Z() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "zero1111",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	// LLM returns a review with summary but no inline comments
+	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
+		return 200, json.RawMessage(`{
+            "id": "chatcmpl-zero-1", "object": "chat.completion", "model": "test-model",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_zero", "type": "function",
+                        "function": {
+                            "name": "final_result",
+                            "arguments": "{\"summary\":\"Looks good, no issues found.\",\"comments\":[]}"
+                        }
+                    }]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
+        }`)
+	}
+
+	_, repoID, _ := SetupProviderAndRepo(t, clients, gitlab)
+
+	triggerResp, err := clients.Review.TriggerReview(context.Background(),
+		connect.NewRequest(&apiv1.TriggerReviewRequest{RepoId: repoID, MrNumber: 1}))
+	if err != nil {
+		t.Fatalf("TriggerReview: %v", err)
+	}
+	runID := triggerResp.Msg.ReviewRun.Id
+
+	run := PollReviewRun(t, clients.Review, runID,
+		apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED, 60*time.Second, 2*time.Second)
+	if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED {
+		t.Errorf("expected COMPLETED, got %s", run.Status)
+	}
+	if len(gitlab.Notes()) != 1 {
+		t.Errorf("expected 1 summary note, got %d", len(gitlab.Notes()))
+	}
+	if len(gitlab.Discussions()) != 0 {
+		t.Errorf("expected 0 discussions for clean diff, got %d", len(gitlab.Discussions()))
+	}
+	if len(run.Comments) != 0 {
+		t.Errorf("expected 0 inline comments in completed run, got %d", len(run.Comments))
+	}
+}
+
+// TestInvalidTokenAtReviewTime verifies that a GitLab 401 at review time results in a FAILED run.
+func TestInvalidTokenAtReviewTime(t *testing.T) {
+	// Configure mock to return 401 for all MR endpoints (simulates expired/invalid token)
+	gitlab.SetMR("100", "1", &MRConfig{
+		StatusCode: 401,
+		Details:    json.RawMessage(`{"message":"401 Unauthorized"}`),
+	})
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	_, repoID, _ := SetupProviderAndRepo(t, clients, gitlab)
+
+	triggerResp, err := clients.Review.TriggerReview(context.Background(),
+		connect.NewRequest(&apiv1.TriggerReviewRequest{RepoId: repoID, MrNumber: 1}))
+	if err != nil {
+		t.Fatalf("TriggerReview: %v", err)
+	}
+	runID := triggerResp.Msg.ReviewRun.Id
+
+	run := PollReviewRun(t, clients.Review, runID,
+		apiv1.ReviewStatus_REVIEW_STATUS_FAILED, 60*time.Second, 2*time.Second)
+	if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_FAILED {
+		t.Errorf("expected FAILED (401 from GitLab), got %s", run.Status)
+	}
+	if llm.RequestCount() != 0 {
+		t.Errorf("expected 0 LLM calls when GitLab returns 401, got %d", llm.RequestCount())
+	}
+	if len(gitlab.Notes()) != 0 {
+		t.Errorf("expected 0 notes, got %d", len(gitlab.Notes()))
+	}
+}
+
+// TestClosedMergedMRIgnored verifies that close and merge webhook actions produce no review run.
+func TestClosedMergedMRIgnored(t *testing.T) {
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	// Webhook with action=close
+	resp := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "close", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("close webhook: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Webhook with action=merge
+	resp2 := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "merge", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		t.Errorf("merge webhook: expected 200, got %d", resp2.StatusCode)
+	}
+
+	time.Sleep(3 * time.Second)
+	runs := QueryReviewRuns(t, repoID, 1)
+	if len(runs) != 0 {
+		t.Errorf("expected 0 review runs for close/merge webhooks, got %d", len(runs))
+	}
+	if llm.RequestCount() != 0 {
+		t.Errorf("expected 0 LLM calls, got %d", llm.RequestCount())
+	}
+}
+
+// TestDebounceRapidPushes verifies two rapid webhooks (different SHAs) collapse to one review.
+// The second webhook cancels the first in-flight review; the resulting review debounces for 3 min.
+func TestDebounceRapidPushes(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Rapid push v1", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/rapid", "target_branch": "main",
+            "sha": "dbnc1sha0", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "d.go", "new_path": "d.go",
+            "diff": "@@ -1,2 +1,3 @@\n package d\n+// debounce v1\n func D() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "dbnc1sha0",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	llm.DefaultResponse = defaultLLMResponse
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	// Send first webhook
+	resp := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "open", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp.Body.Close()
+
+	// Immediately update to a new SHA and send second webhook (cancels first)
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Rapid push v2", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/rapid", "target_branch": "main",
+            "sha": "dbnc2sha0", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "d.go", "new_path": "d.go",
+            "diff": "@@ -1,2 +1,3 @@\n package d\n+// debounce v2 wins\n func D() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 2, "head_commit_sha": "dbnc2sha0",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	resp2 := SendWebhook(t, clients.BaseURL, providerID, webhookSecret, map[string]any{
+		"object_kind": "merge_request",
+		"project":     map[string]any{"id": 100},
+		"object_attributes": map[string]any{
+			"iid": 1, "action": "update", "draft": false, "work_in_progress": false,
+		},
+	})
+	resp2.Body.Close()
+
+	// Wait for the single completed review (second, after 3-min debounce)
+	WaitForReviewRun(t, repoID, 1, "completed", 300*time.Second)
+
+	runs := QueryReviewRuns(t, repoID, 1)
+	completedCount := 0
+	for _, r := range runs {
+		if r.Status == "completed" {
+			completedCount++
+		}
+	}
+	if completedCount != 1 {
+		t.Errorf("expected 1 completed run (debounce collapsed rapid pushes), got %d", completedCount)
+	}
+	// First review was cancelled before reaching LLM; second calls LLM after debounce
+	if llm.RequestCount() != 1 {
+		t.Errorf("expected 1 LLM call (second review only), got %d", llm.RequestCount())
+	}
+}
+
+// TestMalformedWebhookBody verifies a malformed JSON webhook body doesn't cause a 500 error.
+func TestMalformedWebhookBody(t *testing.T) {
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	// Send raw invalid JSON with a valid auth token
+	body := []byte(`not valid json{{`)
+	req, err := http.NewRequest("POST",
+		fmt.Sprintf("%s/webhooks/%s", clients.BaseURL, providerID),
+		bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Gitlab-Token", webhookSecret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("sending malformed webhook: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode == 500 {
+		t.Errorf("malformed webhook body: got 500, want 4xx or 200")
+	}
+
+	time.Sleep(2 * time.Second)
+	runs := QueryReviewRuns(t, repoID, 1)
+	if len(runs) != 0 {
+		t.Errorf("expected 0 review runs for malformed webhook, got %d", len(runs))
+	}
+	if llm.RequestCount() != 0 {
+		t.Errorf("expected 0 LLM calls, got %d", llm.RequestCount())
+	}
+}
+
+// TestManyInlineComments verifies 50 inline comments are all posted correctly to GitLab.
+func TestManyInlineComments(t *testing.T) {
+	gitlab.SetMR("100", "1", &MRConfig{
+		Details: json.RawMessage(`{
+            "iid": 1, "title": "Big PR", "description": "",
+            "author": {"username": "alice"},
+            "source_branch": "feature/big", "target_branch": "main",
+            "sha": "many1111", "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{"old_path": "big.go", "new_path": "big.go",
+            "diff": "@@ -1,2 +1,52 @@\n package big\n+// many issues here\n func Big() {}",
+            "new_file": false, "deleted_file": false, "renamed_file": false}]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "many1111",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+	t.Cleanup(func() { gitlab.Reset(); llm.Reset() })
+	gitlab.Reset()
+	llm.Reset()
+
+	// Build a response with 50 inline comments
+	type comment struct {
+		FilePath  string `json:"file_path"`
+		LineStart int    `json:"line_start"`
+		LineEnd   int    `json:"line_end"`
+		Body      string `json:"body"`
+	}
+	type finalResult struct {
+		Summary  string    `json:"summary"`
+		Comments []comment `json:"comments"`
+	}
+	comments := make([]comment, 50)
+	for i := range comments {
+		comments[i] = comment{
+			FilePath:  "big.go",
+			LineStart: i + 1,
+			LineEnd:   i + 1,
+			Body:      fmt.Sprintf("Issue %d: consider refactoring this line.", i+1),
+		}
+	}
+	resultArgs := finalResult{
+		Summary:  "Found 50 issues requiring attention.",
+		Comments: comments,
+	}
+	argsJSON, _ := json.Marshal(resultArgs)
+	llmResp := map[string]any{
+		"id": "chatcmpl-many-1", "object": "chat.completion", "model": "test-model",
+		"choices": []map[string]any{{
+			"index": 0,
+			"message": map[string]any{
+				"role": "assistant",
+				"tool_calls": []map[string]any{{
+					"id": "call_many", "type": "function",
+					"function": map[string]any{
+						"name": "final_result", "arguments": string(argsJSON),
+					},
+				}},
+			},
+			"finish_reason": "stop",
+		}},
+		"usage": map[string]int{"prompt_tokens": 200, "completion_tokens": 500, "total_tokens": 700},
+	}
+	llmRespJSON, _ := json.Marshal(llmResp)
+	llm.ResponseFunc = func(reqBody []byte) (int, json.RawMessage) {
+		return 200, json.RawMessage(llmRespJSON)
+	}
+
+	_, repoID, _ := SetupProviderAndRepo(t, clients, gitlab)
+
+	triggerResp, err := clients.Review.TriggerReview(context.Background(),
+		connect.NewRequest(&apiv1.TriggerReviewRequest{RepoId: repoID, MrNumber: 1}))
+	if err != nil {
+		t.Fatalf("TriggerReview: %v", err)
+	}
+	runID := triggerResp.Msg.ReviewRun.Id
+
+	run := PollReviewRun(t, clients.Review, runID,
+		apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED, 120*time.Second, 2*time.Second)
+	if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED {
+		t.Errorf("expected COMPLETED, got %s", run.Status)
+	}
+	if len(run.Comments) != 50 {
+		t.Errorf("expected 50 comments in run, got %d", len(run.Comments))
+	}
+	discussions := gitlab.Discussions()
+	if len(discussions) != 50 {
+		t.Errorf("expected 50 discussions posted to GitLab, got %d", len(discussions))
 	}
 }

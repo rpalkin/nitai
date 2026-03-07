@@ -30,3 +30,5 @@ pgdata/
 restate-data/
 
 /*/out/
+specs/CURRENT.md
+specs/REVIEW.md

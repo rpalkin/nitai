@@ -80,6 +80,7 @@ SQL files in `migrations/` managed by golang-migrate, embedded in the binary:
 - **Webhook handler uses interfaces** — `WebhookStore` and `RestateDispatcher` interfaces enable unit testing with stubs (no DB/Restate needed)
 - **Debounce via cancel-and-replace** — webhook handler cancels active Restate invocation (looked up via `restate_invocation_id` on the latest review_run) before dispatching a new one for the same MR. Cancel is best-effort: failure is logged but does not block dispatch.
 - **Invocation ID tracking** — `SendPRReview` returns the Restate invocation ID from the `202 Accepted` response. Stored on `review_runs.restate_invocation_id` for subsequent cancel-on-new-push.
+- **Single run per webhook** — webhook handler creates the run first (`CreateReviewRun`), passes `RunID` to `SendPRReview`, then updates with `UpdateReviewRunInvocationID`. This ensures exactly one DB run per webhook-triggered review (the worker reuses the existing run instead of creating a second one).
 - **Draft MR tracking** — draft MRs create a `status=draft` review run (no Restate dispatch); draft→ready transition converts it to `pending` and dispatches. `TransitionDraftToReview` is idempotent (updates at most one row).
 - **Webhook token validation** — uses `crypto/subtle.ConstantTimeCompare` to prevent timing attacks. `webhook_secret` column is nullable for backward compatibility with pre-migration providers.
 

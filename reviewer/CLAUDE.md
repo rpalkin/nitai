@@ -34,6 +34,7 @@ pytest tests/test_tools.py -k test_read_file_success
 - `REVIEWER_HOST` — bind host (default: `0.0.0.0`)
 - `REVIEWER_PORT` — bind port (default: `9090`)
 - `SEARCH_MCP_URL` — search-MCP server URL for semantic search tool (default: `http://search-mcp:8080/mcp`)
+- `LOG_LEVEL` — logging level (default: `INFO`, set to `DEBUG` for verbose output)
 
 ## Architecture
 
@@ -41,7 +42,7 @@ pytest tests/test_tools.py -k test_read_file_success
 
 ### Files
 
-- **`service.py`** — Restate service `Reviewer` with handler `RunReview`. Receives `ReviewRequest`, builds prompt, runs Pydantic AI agent with tools, returns `ReviewResponse`. 4xx LLM errors are raised as `restate.TerminalError` (non-retryable). Runs on Hypercorn ASGI server.
+- **`service.py`** — Restate service `Reviewer` with handler `RunReview`. Receives `ReviewRequest`, builds prompt, runs Pydantic AI agent with tools, returns `ReviewResponse`. LLM call wrapped in `ctx.run("run-review-agent", ...)` for durability — Restate tracks the call, caches result for replay, and can cancel it properly. Agent run has a 5-minute `asyncio.wait_for` timeout. 4xx LLM errors are raised as `restate.TerminalError` (non-retryable). Configurable logging via `LOG_LEVEL` env var. Runs on Hypercorn ASGI server.
 - **`agent.py`** — Pydantic AI `Agent[ReviewDeps, ReviewResponse]` with `output_type=ReviewResponse`. Uses `OpenAIChatModel` + `OpenAIProvider` pointed at OpenRouter (`https://openrouter.ai/api/v1`). System prompt defines reviewer persona and guidelines. Two tools registered: `read_file` and `search_codebase`.
 - **`tools.py`** — Tool implementations:
   - `read_file(ctx, file_path)` — reads file from bare clone via `git --git-dir show <sha>:<path>`. Validates SHA (hex), file path (no `..` traversal). 500KB size limit + binary detection. `repo_path` and `sha` injected from `ctx.deps` (ReviewDeps).
@@ -66,3 +67,7 @@ pytest tests/test_tools.py -k test_read_file_success
 - **`asyncio.to_thread`** — `read_file` wraps sync `subprocess.run` to avoid blocking the async event loop.
 - **`fastmcp.Client`** — handles full MCP protocol (initialize + initialized notification + tools/call) for search; no manual session management.
 - **Error strings, not exceptions** — tools return human-readable error strings on failure so the LLM can adjust rather than crashing.
+- **ctx.run() wrapper** — LLM agent call is wrapped in `ctx.run()` so Restate tracks it as a durable step. Result is cached for replay; cancellation propagates cleanly.
+- **File read cache** — `ReviewDeps._file_cache` dict caches successful `read_file` results within a single review. Errors are not cached.
+- **Search timeout** — `search_mcp()` has a 10-second `asyncio.wait_for` timeout on `call_tool`.
+- **`.git/` path rejection** — `_validate_file_path` rejects `.git` in path components (not just `..`).

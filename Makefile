@@ -18,13 +18,26 @@ smoke:
 	./tests/smoke.sh
 
 e2e:
-	docker compose -p e2e build
+	@echo "=== Cleaning all test data for fresh e2e run ==="
+	@echo "Removing Docker volumes..."
 	docker volume rm e2e_restate-e2e-data 2>/dev/null || true
-	@E2E_LOG=$$(mktemp /tmp/e2e-test-XXXXXX) && echo "e2e log: $$E2E_LOG" && \
+	docker compose -p e2e down -v 2>/dev/null || true
+	@echo "Clearing local data directories..."
+	rm -rf ./db/* 2>/dev/null || true
+	rm -rf ./pgdata/* 2>/dev/null || true
+	rm -rf ./restate-data/* 2>/dev/null || true
+	@echo "Building fresh containers..."
+	docker compose -p e2e build
+	@RUN_FLAGS=""; \
+	if [ -n "$(TEST_INCLUDE)" ]; then \
+		RUN_FLAGS="-run $(TEST_INCLUDE)"; \
+		echo "Running tests matching: $(TEST_INCLUDE)"; \
+	fi; \
+	E2E_LOG=$$(mktemp /tmp/e2e-test-XXXXXX) && echo "e2e log: $$E2E_LOG" && \
 		cd e2e && \
 		DOCKER_HOST=$${DOCKER_HOST:-$$(docker context inspect --format '{{.Endpoints.docker.Host}}')} \
 		TESTCONTAINERS_RYUK_DISABLED=true \
-		GOWORK=off go test -v -tags e2e -count=1 -timeout 300s ./... 2>&1 | tee $$E2E_LOG; \
+		GOWORK=off go test -v -tags e2e -count=1 -timeout 900s $$RUN_FLAGS ./... 2>&1 | tee $$E2E_LOG; \
 		exit $${PIPESTATUS[0]}
 
 unit:

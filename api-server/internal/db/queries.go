@@ -45,14 +45,14 @@ type RepoUpsertInput struct {
 
 // ReviewRunRow holds a review run row from the database.
 type ReviewRunRow struct {
-	ID                   string
-	RepoID               string
-	MRNumber             int64
-	Status               string
-	Summary              *string
-	RestateInvocationID  *string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	ID                  string
+	RepoID              string
+	MRNumber            int64
+	Status              string
+	Summary             *string
+	RestateInvocationID *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // ReviewCommentRow holds a review comment row from the database.
@@ -290,11 +290,12 @@ func GetRepoByRemoteID(ctx context.Context, pool *pgxpool.Pool, providerID, remo
 }
 
 // GetActiveInvocationID returns the restate_invocation_id of the most recent pending/running review run for the given repo+MR.
+// Note: Excludes runs with NULL restate_invocation_id (e.g., worker-created runs without invocation tracking).
 func GetActiveInvocationID(ctx context.Context, pool *pgxpool.Pool, repoID string, mrNumber int64) (*string, error) {
 	const q = `
 		SELECT restate_invocation_id
 		FROM review_runs
-		WHERE repo_id = $1 AND mr_number = $2 AND status IN ('pending', 'running')
+		WHERE repo_id = $1 AND mr_number = $2 AND status IN ('pending', 'running') AND restate_invocation_id IS NOT NULL
 		ORDER BY created_at DESC
 		LIMIT 1`
 
@@ -337,10 +338,11 @@ func CreateDraftReviewRun(ctx context.Context, pool *pgxpool.Pool, repoID string
 	return id, nil
 }
 
-// TransitionDraftToReview updates the most recent draft row for this repo+MR to status=pending.
-// No-op if no draft row exists.
+// TransitionDraftToReview updates the most recent draft row for this repo+MR to status=pending,
+// or inserts a new pending row if no draft exists. This is idempotent and prevents orphaned rows.
 func TransitionDraftToReview(ctx context.Context, pool *pgxpool.Pool, repoID string, mrNumber int64) error {
-	const q = `
+	// First, try to update an existing draft row
+	const updateQ = `
 		UPDATE review_runs
 		SET status = 'pending'
 		WHERE id = (
@@ -350,10 +352,36 @@ func TransitionDraftToReview(ctx context.Context, pool *pgxpool.Pool, repoID str
 			LIMIT 1
 		)`
 
-	_, err := pool.Exec(ctx, q, repoID, mrNumber)
+	result, err := pool.Exec(ctx, updateQ, repoID, mrNumber)
 	if err != nil {
 		return fmt.Errorf("TransitionDraftToReview: %w", err)
 	}
+
+	// If no draft row was updated, we need to ensure a pending row exists
+	// to avoid creating orphaned rows when the webhook continues
+	if result.RowsAffected() == 0 {
+		// Check if there's already a pending/completed row for this MR
+		const checkQ = `
+			SELECT COUNT(*) FROM review_runs
+			WHERE repo_id = $1 AND mr_number = $2 AND status IN ('pending', 'running', 'completed', 'failed')`
+
+		var count int
+		if err := pool.QueryRow(ctx, checkQ, repoID, mrNumber).Scan(&count); err != nil {
+			return fmt.Errorf("TransitionDraftToReview: checking existing runs: %w", err)
+		}
+
+		// Only insert if there's no existing non-draft row
+		if count == 0 {
+			const insertQ = `
+				INSERT INTO review_runs (repo_id, mr_number, status)
+				VALUES ($1, $2, 'pending')`
+
+			if _, err := pool.Exec(ctx, insertQ, repoID, mrNumber); err != nil {
+				return fmt.Errorf("TransitionDraftToReview: inserting pending run: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
 

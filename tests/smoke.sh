@@ -70,13 +70,21 @@ echo "    OK"
 
 # ── Start full stack (Restate registers automatically) ────────────────────────
 
-echo "==> Starting restate, worker, reviewer, api-server (restate-register runs automatically)"
-docker compose up -d restate worker reviewer api-server restate-register
+echo "==> Starting restate, worker, reviewer, api-server, indexer, qdrant (restate-register runs automatically)"
+docker compose up -d restate worker reviewer api-server indexer qdrant restate-register
 
 echo "==> Waiting for Restate admin API..."
 for i in $(seq 1 30); do
   curl -sf "$RESTATE_ADMIN/health" &>/dev/null && break
   [[ $i -eq 30 ]] && { echo "ERROR: Restate admin API did not become ready in time" >&2; exit 1; }
+  sleep 1
+done
+echo "    OK"
+
+echo "==> Waiting for Qdrant to be healthy..."
+for i in $(seq 1 30); do
+  curl -sf http://localhost:6333/healthz &>/dev/null && break
+  [[ $i -eq 30 ]] && { echo "ERROR: Qdrant did not become healthy in time" >&2; exit 1; }
   sleep 1
 done
 echo "    OK"
@@ -107,7 +115,7 @@ echo "==> Verifying registered services"
 SERVICES=$(curl -sf "$RESTATE_ADMIN/services" | jq -r '.services[].name')
 
 FAILED=false
-for svc in DiffFetcher PostReview PRReview Reviewer; do
+for svc in DiffFetcher PostReview PRReview Reviewer RepoSyncer Indexer IndexMainBranch; do
   if echo "$SERVICES" | grep -qx "$svc"; then
     echo "    ✓ $svc"
   else

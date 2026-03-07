@@ -71,6 +71,37 @@ func (c *Client) SendPRReview(ctx context.Context, key string, req PRReviewReque
 	return result.InvocationID, nil
 }
 
+// IndexMainBranchRequest is the request body for the IndexMainBranch Run handler.
+type IndexMainBranchRequest struct {
+	RepoID string `json:"repo_id"`
+}
+
+// SendIndexMainBranch sends a fire-and-forget IndexMainBranch/Run message to Restate.
+func (c *Client) SendIndexMainBranch(ctx context.Context, repoID string, req IndexMainBranchRequest) error {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshaling request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/IndexMainBranch/%s/Run/send", c.baseURL, repoID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("restate: unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // CancelInvocation cancels a Restate invocation by ID. 404 (already completed) is silently ignored.
 func (c *Client) CancelInvocation(ctx context.Context, invocationID string) error {
 	url := fmt.Sprintf("%s/invocations/%s/cancel", c.adminURL, invocationID)

@@ -82,7 +82,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	providerHandler := handler.NewProviderHandler(pool, encKey)
-	repoHandler := handler.NewRepoHandler(pool)
+	repoHandler := handler.NewRepoHandler(pool, restateClient)
 	reviewHandler := handler.NewReviewHandler(pool, restateClient)
 
 	mux.Handle(apiv1connect.NewProviderServiceHandler(providerHandler, connect.WithRecover(recoverHandler)))

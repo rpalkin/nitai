@@ -28,10 +28,11 @@ type GitProvider interface {
 
 // Repo is a repository accessible to the authenticated user.
 type Repo struct {
-	RemoteID string // provider-specific identifier
-	Name     string
-	FullPath string
-	HTTPURL  string
+	RemoteID      string // provider-specific identifier
+	Name          string
+	FullPath      string
+	HTTPURL       string
+	DefaultBranch string
 }
 
 // MRDiff holds the diff for a merge request.

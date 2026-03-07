@@ -39,13 +39,13 @@ func insertProviderTx(ctx context.Context, pool *pgxpool.Pool, orgID, provTypeSt
 	}
 
 	const uq = `
-		INSERT INTO repositories (provider_id, remote_id, name, full_path)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO repositories (provider_id, remote_id, name, full_path, default_branch)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (provider_id, remote_id) DO UPDATE
-		SET name = EXCLUDED.name, full_path = EXCLUDED.full_path`
+		SET name = EXCLUDED.name, full_path = EXCLUDED.full_path, default_branch = EXCLUDED.default_branch`
 
 	for _, r := range upsertInputs {
-		if _, err := tx.Exec(ctx, uq, row.ID, r.RemoteID, r.Name, r.FullPath); err != nil {
+		if _, err := tx.Exec(ctx, uq, row.ID, r.RemoteID, r.Name, r.FullPath, r.DefaultBranch); err != nil {
 			return nil, fmt.Errorf("upsert repo: %w", err)
 		}
 	}
@@ -109,9 +109,10 @@ func (h *ProviderHandler) CreateProvider(ctx context.Context, req *connect.Reque
 	for i, r := range repos {
 		upsertInputs[i] = db.RepoUpsertInput{
 			// ProviderID is filled inside insertProviderTx after the INSERT.
-			RemoteID: r.RemoteID,
-			Name:     r.Name,
-			FullPath: r.FullPath,
+			RemoteID:      r.RemoteID,
+			Name:          r.Name,
+			FullPath:      r.FullPath,
+			DefaultBranch: r.DefaultBranch,
 		}
 	}
 

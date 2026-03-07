@@ -13,6 +13,7 @@ import (
 	"ai-reviewer/go-services/internal/crypto"
 	"ai-reviewer/go-services/internal/db"
 	"ai-reviewer/go-services/internal/difffetcher"
+	"ai-reviewer/go-services/internal/indexmainbranch"
 	"ai-reviewer/go-services/internal/postreview"
 	"ai-reviewer/go-services/internal/prreview"
 	"ai-reviewer/go-services/internal/reposyncer"
@@ -51,6 +52,7 @@ func main() {
 	postReviewSvc := postreview.New(pool, encKey)
 	prReviewSvc := prreview.New(pool)
 	repoSyncerSvc := reposyncer.New(pool, encKey)
+	indexMainBranchSvc := indexmainbranch.New(pool)
 
 	log.Printf("starting worker on %s", cfg.WorkerAddr)
 	if err := server.NewRestate().
@@ -58,6 +60,7 @@ func main() {
 		Bind(restate.Reflect(postReviewSvc)).
 		Bind(restate.Reflect(prReviewSvc)).
 		Bind(restate.Reflect(repoSyncerSvc)).
+		Bind(restate.Reflect(indexMainBranchSvc)).
 		Start(ctx, cfg.WorkerAddr); err != nil {
 		log.Fatalf("server error: %v", err)
 	}

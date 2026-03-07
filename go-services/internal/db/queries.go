@@ -18,10 +18,12 @@ type ProviderRow struct {
 
 // RepoRow holds repository data from the repositories table.
 type RepoRow struct {
-	ID       string
-	RemoteID string
-	Name     string
-	FullPath string
+	ID            string
+	RemoteID      string
+	Name          string
+	FullPath      string
+	DefaultBranch string
+	ReviewEnabled bool
 }
 
 // ReviewCommentRow holds a review comment row from the database.
@@ -45,7 +47,7 @@ type ReviewCommentInput struct {
 // GetRepoWithProvider fetches a repository and its provider by repo ID.
 func GetRepoWithProvider(ctx context.Context, pool *pgxpool.Pool, repoID string) (*RepoRow, *ProviderRow, error) {
 	const q = `
-		SELECT r.id, r.remote_id, r.name, r.full_path,
+		SELECT r.id, r.remote_id, r.name, r.full_path, r.default_branch, r.review_enabled,
 		       p.id, p.type, p.base_url, p.token_encrypted
 		FROM repositories r
 		JOIN providers p ON p.id = r.provider_id
@@ -54,7 +56,7 @@ func GetRepoWithProvider(ctx context.Context, pool *pgxpool.Pool, repoID string)
 	var repo RepoRow
 	var prov ProviderRow
 	err := pool.QueryRow(ctx, q, repoID).Scan(
-		&repo.ID, &repo.RemoteID, &repo.Name, &repo.FullPath,
+		&repo.ID, &repo.RemoteID, &repo.Name, &repo.FullPath, &repo.DefaultBranch, &repo.ReviewEnabled,
 		&prov.ID, &prov.Type, &prov.BaseURL, &prov.TokenEncrypted,
 	)
 	if err != nil {

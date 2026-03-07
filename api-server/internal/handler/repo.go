@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"connectrpc.com/connect"
 	"github.com/jackc/pgx/v5"
@@ -12,17 +13,19 @@ import (
 	apiv1 "ai-reviewer/gen/api/v1"
 	"ai-reviewer/gen/api/v1/apiv1connect"
 	"ai-reviewer/api-server/internal/db"
+	"ai-reviewer/api-server/internal/restate"
 )
 
 // RepoHandler implements apiv1connect.RepoServiceHandler.
 type RepoHandler struct {
 	apiv1connect.UnimplementedRepoServiceHandler
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	restateClient *restate.Client
 }
 
 // NewRepoHandler creates a RepoHandler.
-func NewRepoHandler(pool *pgxpool.Pool) *RepoHandler {
-	return &RepoHandler{pool: pool}
+func NewRepoHandler(pool *pgxpool.Pool, restateClient *restate.Client) *RepoHandler {
+	return &RepoHandler{pool: pool, restateClient: restateClient}
 }
 
 // ListRepos returns all repositories for the given provider.
@@ -55,6 +58,14 @@ func (h *RepoHandler) EnableReview(ctx context.Context, req *connect.Request[api
 			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("repository not found"))
 		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("enabling review: %w", err))
+	}
+
+	if h.restateClient != nil {
+		if err := h.restateClient.SendIndexMainBranch(ctx, req.Msg.RepoId, restate.IndexMainBranchRequest{
+			RepoID: req.Msg.RepoId,
+		}); err != nil {
+			log.Printf("EnableReview: failed to trigger IndexMainBranch: %v", err)
+		}
 	}
 
 	return connect.NewResponse(&apiv1.EnableReviewResponse{

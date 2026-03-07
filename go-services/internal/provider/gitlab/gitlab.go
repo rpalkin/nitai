@@ -119,10 +119,11 @@ func (c *Client) ListRepos(ctx context.Context) ([]provider.Repo, error) {
 
 		for _, p := range projects {
 			repos = append(repos, provider.Repo{
-				RemoteID: strconv.Itoa(p.ID),
-				Name:     p.Name,
-				FullPath: p.PathWithNamespace,
-				HTTPURL:  p.HTTPURLToRepo,
+				RemoteID:      strconv.Itoa(p.ID),
+				Name:          p.Name,
+				FullPath:      p.PathWithNamespace,
+				HTTPURL:       p.HTTPURLToRepo,
+				DefaultBranch: p.DefaultBranch,
 			})
 		}
 

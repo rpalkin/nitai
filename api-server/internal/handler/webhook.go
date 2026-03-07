@@ -23,6 +23,8 @@ type WebhookStore interface {
 	GetProvider(ctx context.Context, id string) (*db.ProviderRow, error)
 	GetRepoByRemoteID(ctx context.Context, providerID, remoteID string) (*db.RepoRow, error)
 	GetActiveInvocationID(ctx context.Context, repoID string, mrNumber int64) (*string, error)
+	CreateReviewRun(ctx context.Context, repoID string, mrNumber int64) (string, error)
+	UpdateReviewRunInvocationID(ctx context.Context, runID, invocationID string) error
 	CreateReviewRunWithInvocation(ctx context.Context, repoID string, mrNumber int64, invocationID string) (string, error)
 	CreateDraftReviewRun(ctx context.Context, repoID string, mrNumber int64) (string, error)
 	TransitionDraftToReview(ctx context.Context, repoID string, mrNumber int64) error
@@ -52,6 +54,16 @@ func (s *PoolWebhookStore) GetRepoByRemoteID(ctx context.Context, providerID, re
 // GetActiveInvocationID implements WebhookStore.
 func (s *PoolWebhookStore) GetActiveInvocationID(ctx context.Context, repoID string, mrNumber int64) (*string, error) {
 	return db.GetActiveInvocationID(ctx, s.Pool, repoID, mrNumber)
+}
+
+// CreateReviewRun implements WebhookStore.
+func (s *PoolWebhookStore) CreateReviewRun(ctx context.Context, repoID string, mrNumber int64) (string, error) {
+	return db.CreateReviewRun(ctx, s.Pool, repoID, mrNumber)
+}
+
+// UpdateReviewRunInvocationID implements WebhookStore.
+func (s *PoolWebhookStore) UpdateReviewRunInvocationID(ctx context.Context, runID, invocationID string) error {
+	return db.UpdateReviewRunInvocationID(ctx, s.Pool, runID, invocationID)
 }
 
 // CreateReviewRunWithInvocation implements WebhookStore.
@@ -232,20 +244,34 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cancel existing active invocation (best-effort).
+	log.Printf("webhook: checking for existing active invocation for repo=%s mr=%d", repo.ID, mrIID)
 	activeInvocationID, err := h.store.GetActiveInvocationID(ctx, repo.ID, mrIID)
 	if err != nil {
-		log.Printf("webhook: GetActiveInvocationID: %v", err)
+		log.Printf("webhook: GetActiveInvocationID error for repo=%s mr=%d: %v", repo.ID, mrIID, err)
 	} else if activeInvocationID != nil {
+		log.Printf("webhook: found active invocation %s for repo=%s mr=%d, attempting cancellation", *activeInvocationID, repo.ID, mrIID)
 		if err := h.dispatcher.CancelInvocation(ctx, *activeInvocationID); err != nil {
-			log.Printf("webhook: CancelInvocation(%s): %v (continuing)", *activeInvocationID, err)
+			log.Printf("webhook: CancelInvocation(%s) failed for repo=%s mr=%d: %v (continuing)", *activeInvocationID, repo.ID, mrIID, err)
 		} else {
-			log.Printf("webhook: cancelled invocation %s for repo=%s mr=%d", *activeInvocationID, repo.ID, mrIID)
+			log.Printf("webhook: successfully cancelled invocation %s for repo=%s mr=%d", *activeInvocationID, repo.ID, mrIID)
 		}
+	} else {
+		log.Printf("webhook: no existing active invocation found for repo=%s mr=%d", repo.ID, mrIID)
 	}
 
-	// Submit new review invocation.
+	// Create review run record first (without invocation ID - will be updated after dispatch).
+	runID, err := h.store.CreateReviewRun(ctx, repo.ID, mrIID)
+	if err != nil {
+		log.Printf("webhook: CreateReviewRun: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("webhook: created review run=%s for repo=%s mr=%d", runID, repo.ID, mrIID)
+
+	// Submit new review invocation with the run ID.
 	key := fmt.Sprintf("%s-%d", repo.ID, mrIID)
 	invocationID, err := h.dispatcher.SendPRReview(ctx, key, restate.PRReviewRequest{
+		RunID:    runID,
 		RepoID:   repo.ID,
 		MRNumber: mrIID,
 	})
@@ -254,16 +280,14 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("webhook: dispatched invocation=%s for run=%s", invocationID, runID)
 
-	// Create review run record.
-	runID, err := h.store.CreateReviewRunWithInvocation(ctx, repo.ID, mrIID, invocationID)
-	if err != nil {
-		log.Printf("webhook: CreateReviewRunWithInvocation: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+	// Update the run with the invocation ID for cancellation tracking.
+	if err := h.store.UpdateReviewRunInvocationID(ctx, runID, invocationID); err != nil {
+		log.Printf("webhook: UpdateReviewRunInvocationID: %v (continuing)", err)
 	}
 
-	log.Printf("webhook: dispatched review run=%s invocation=%s repo=%s mr=%d", runID, invocationID, repo.ID, mrIID)
+	log.Printf("webhook: completed dispatch run=%s invocation=%s repo=%s mr=%d", runID, invocationID, repo.ID, mrIID)
 	w.WriteHeader(http.StatusOK)
 }
 

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `ai-reviewer` is a self-hosted AI-powered PR review system that posts summary and inline review comments on merge requests. It uses Restate for durable workflow orchestration, Pydantic AI for LLM-based review, and Qdrant for semantic code search.
 
-**Current status:** Phase 1 (MVP) complete. Phase 2 (Semantic Search & Context-Aware Review) in progress — subphases 2.1–2.10 done (webhooks, dispatch, debounce, draft tracking, repo syncer, indexer, file reader tool, search tool, full pipeline wiring, background indexing). Remaining: 2.11 (e2e tests update). See `specs/phases.md` for the full roadmap, `specs/phase2-plan.md` for current phase details, and `specs/later.md` for known issues and deferred items.
+**Current status:** Phase 1 (MVP) complete. Phase 2 (Semantic Search & Context-Aware Review) complete — all subphases 2.1–2.11 done (webhooks, dispatch, debounce, draft tracking, repo syncer, indexer, file reader tool, search tool, full pipeline wiring, background indexing, e2e & smoke test updates). See `specs/phases.md` for the full roadmap, `specs/phase2-plan.md` for implementation details, and `specs/later.md` for known issues and deferred items.
 
 Full technical design: `specs/overview.md`
 

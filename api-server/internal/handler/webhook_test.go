@@ -16,17 +16,17 @@ import (
 
 // stubWebhookStore is a test double for WebhookStore.
 type stubWebhookStore struct {
-	provider                *db.ProviderRow
-	providerErr             error
-	repo                    *db.RepoRow
-	repoErr                 error
-	activeInvocationID      *string
-	activeInvocationErr     error
-	createdRunID            string
-	createRunErr            error
-	draftRunID              string
-	draftRunErr             error
-	transitionErr           error
+	provider            *db.ProviderRow
+	providerErr         error
+	repo                *db.RepoRow
+	repoErr             error
+	activeInvocationID  *string
+	activeInvocationErr error
+	createdRunID        string
+	createRunErr        error
+	draftRunID          string
+	draftRunErr         error
+	transitionErr       error
 	// tracking
 	createRunCalled      bool
 	createDraftRunCalled bool
@@ -43,6 +43,15 @@ func (s *stubWebhookStore) GetRepoByRemoteID(_ context.Context, _, _ string) (*d
 
 func (s *stubWebhookStore) GetActiveInvocationID(_ context.Context, _ string, _ int64) (*string, error) {
 	return s.activeInvocationID, s.activeInvocationErr
+}
+
+func (s *stubWebhookStore) CreateReviewRun(_ context.Context, _ string, _ int64) (string, error) {
+	s.createRunCalled = true
+	return s.createdRunID, s.createRunErr
+}
+
+func (s *stubWebhookStore) UpdateReviewRunInvocationID(_ context.Context, _, _ string) error {
+	return nil
 }
 
 func (s *stubWebhookStore) CreateReviewRunWithInvocation(_ context.Context, _ string, _ int64, _ string) (string, error) {
@@ -62,12 +71,12 @@ func (s *stubWebhookStore) TransitionDraftToReview(_ context.Context, _ string, 
 
 // stubRestateDispatcher is a test double for RestateDispatcher.
 type stubRestateDispatcher struct {
-	invocationID    string
-	sendErr         error
-	cancelErr       error
-	sendCalled      bool
-	cancelCalled    bool
-	cancelledIDs    []string
+	invocationID string
+	sendErr      error
+	cancelErr    error
+	sendCalled   bool
+	cancelCalled bool
+	cancelledIDs []string
 }
 
 func (s *stubRestateDispatcher) SendPRReview(_ context.Context, _ string, _ restate.PRReviewRequest) (string, error) {

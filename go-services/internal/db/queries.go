@@ -50,7 +50,7 @@ func GetRepoWithProvider(ctx context.Context, pool *pgxpool.Pool, repoID string)
 		SELECT r.id, r.remote_id, r.name, r.full_path, r.default_branch, r.review_enabled,
 		       p.id, p.type, p.base_url, p.token_encrypted
 		FROM repositories r
-		JOIN providers p ON p.id = r.provider_id
+		JOIN providers p ON p.id = r.provider_id AND p.deleted_at IS NULL
 		WHERE r.id = $1`
 
 	var repo RepoRow
@@ -99,14 +99,24 @@ func UpdateReviewRunSummary(ctx context.Context, pool *pgxpool.Pool, runID, summ
 
 // InsertReviewComments bulk-inserts review comments for a run (posted=false).
 func InsertReviewComments(ctx context.Context, pool *pgxpool.Pool, runID string, comments []ReviewCommentInput) error {
+	if len(comments) == 0 {
+		return nil
+	}
+
 	const q = `
 		INSERT INTO review_comments (review_run_id, file_path, line_start, line_end, body, posted)
 		VALUES ($1, $2, $3, $4, $5, false)`
 
+	batch := &pgx.Batch{}
 	for _, c := range comments {
-		if _, err := pool.Exec(ctx, q, runID, c.FilePath, c.LineStart, c.LineEnd, c.Body); err != nil {
-			return fmt.Errorf("InsertReviewComments: %w", err)
-		}
+		batch.Queue(q, runID, c.FilePath, c.LineStart, c.LineEnd, c.Body)
+	}
+
+	br := pool.SendBatch(ctx, batch)
+	defer br.Close()
+
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("InsertReviewComments: %w", err)
 	}
 	return nil
 }

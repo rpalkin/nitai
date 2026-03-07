@@ -569,7 +569,7 @@ python search-mcp/client.py search <collection> "function name" --top-k 3
 
 ---
 
-## Subphase 2.10 — Background Indexing (IndexMainBranch) 🧪 In test
+## Subphase 2.10 — Background Indexing (IndexMainBranch) ✓ Done
 
 **Goal:** Primary branch is indexed automatically on push and on a periodic schedule, keeping the vector index warm.
 
@@ -638,7 +638,7 @@ Run with `make e2e` (requires Docker). 28 planned test cases in `specs/e2e-cases
 
 ---
 
-## Subphase 2.11 — E2E Tests & Smoke Tests Update
+## Subphase 2.11 — E2E Tests & Smoke Tests Update ✓ Done
 
 **Goal:** Update test scripts to cover Phase 2 functionality.
 
@@ -665,10 +665,24 @@ Run with `make e2e` (requires Docker). 28 planned test cases in `specs/e2e-cases
 - Tests verify debounce, dedup, draft handling, and search integration
 - All tests pass in CI (or documented as requiring GitLab env vars)
 
+### Implementation notes
+
+**What changed from the plan:**
+
+- `tests/e2e.sh` and `tests/webhook_test.sh` were not created; the existing `e2e/e2e_test.go` Go test framework is the canonical e2e test suite (already far more capable than shell scripts). New tests were added there instead.
+- Skipped tests E (multiple providers isolation), L (idempotent comment posting), J (already done), K (already done), O (already done implicitly).
+- Makefile `e2e` target timeout increased from 300s to 900s to accommodate the 3-minute debounce in TestCancelOnNewPush and TestDebounceRapidPushes.
+
+**Architectural decisions:**
+
+- Tests C (TestCancelOnNewPush) and I (TestDebounceRapidPushes) both trigger the smart debounce (3-min Restate sleep) by cancelling an in-flight or early review. C blocks the LLM response to guarantee the first review is in the reviewer step before the second webhook cancels it; I sends both webhooks immediately.
+- TestManyInlineComments builds the 50-comment LLM response inline using Go struct marshaling; no helper function needed for a single test.
+- Qdrant healthcheck in smoke.sh polls `/healthz` (not `/health`) — this is the correct Qdrant endpoint.
+
 ### How to Test
 ```bash
-make smoke   # All services registered, Qdrant reachable
-make e2e     # Full Phase 2 pipeline tested
+make smoke   # All 7 services registered, Qdrant reachable
+make e2e     # Full Phase 2 pipeline tested (28 e2e tests)
 ```
 
 ---

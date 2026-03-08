@@ -36,7 +36,7 @@ task update <id> --status in_progress --assigned-to implementation-agent
 
 ## Step 5: Read the full task file
 
-Read `$TASKS_DIR/<id>.md` (in the worktree) carefully — it contains the plan, references, acceptance criteria, and any findings from the planning phase.
+Read `$TASKS_DIR/<id>.md` carefully — it contains the plan, references, acceptance criteria, and any findings from the planning phase. **IMPORTANT:** `$TASKS_DIR` is outside the repo/worktree. Run `echo $TASKS_DIR` to get the absolute path and read the file from there, not from the worktree.
 
 ## Step 6: Implement
 

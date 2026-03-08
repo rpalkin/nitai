@@ -34,17 +34,23 @@ Read the task file at `$TASKS_DIR/$1.md` carefully. Then:
 2. Determine if the task should be **planned as-is** or **broken into subtasks**:
    - A task is small enough to implement as-is if it fits in one agent's context or takes ~5–10 minutes
    - Otherwise, create subtasks: `task create "Subtask name" --parent $1 --type <type>`
-3. Write the plan into the task file's `## Plan` section:
-   - For a leaf task: detailed step-by-step implementation plan with file paths, function names, and approach
-   - For a parent task: summary of the decomposition with brief description of each subtask
+3. Write a **detailed** implementation plan including:
+   - Exact file paths to create or modify
+   - Function/struct signatures
+   - SQL schemas, proto definitions, config changes
+   - Dependencies to add
+   - Wiring / integration steps
+   - Unit test coverage plan
+   - File change summary table
+   - Risks and notes
 
 Log your research findings as you go:
 - `task log $1 --section findings "what you discovered"`
 - `task log $1 --section decisions "why you chose this approach"`
 
-## Step 5: Update the task file
+## Step 5: Write the plan to the task file
 
-Edit `$TASKS_DIR/$1.md` directly to add or update the `## Plan` section with your detailed plan.
+**IMPORTANT:** Write the detailed plan directly into `$TASKS_DIR/$1.md` (NOT into the main repo). Use the `Edit` tool to replace the `## Plan` section with your detailed plan. The `$TASKS_DIR` path is resolved from the environment variable — run `echo $TASKS_DIR` if unsure of the absolute path.
 
 ## Step 6: Mark ready
 

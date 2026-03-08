@@ -24,8 +24,8 @@ Wait for confirmation before continuing. If the user specifies a different task,
 
 ## Step 3: Set up the worktree
 
-Create a dedicated git worktree for this task:
-
+Create a dedicated git worktree for this task if not exists:
+ 
 !`git worktree add ../$1 -b $1`
 
 All implementation work happens inside `../$1/`. Switch to that directory for all file reads, edits, and commands.
@@ -36,7 +36,7 @@ All implementation work happens inside `../$1/`. Switch to that directory for al
 
 ## Step 5: Read the full task file
 
-Read `$TASKS_DIR/$1.md` (in the worktree) carefully — it contains the plan, references, acceptance criteria, and any findings from the planning phase.
+Read `$TASKS_DIR/$1.md` carefully — it contains the plan, references, acceptance criteria, and any findings from the planning phase. **IMPORTANT:** `$TASKS_DIR` is outside the repo/worktree. Run `echo $TASKS_DIR` to get the absolute path and read the file from there, not from the worktree.
 
 ## Step 6: Implement
 

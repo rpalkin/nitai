@@ -32,3 +32,10 @@ restate-data/
 /*/out/
 specs/CURRENT.md
 specs/REVIEW.md
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
+
+# OpenCode plugin dependencies
+.opencode/node_modules/
+.opencode/bun.lock

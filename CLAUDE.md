@@ -6,49 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `ai-reviewer` is a self-hosted AI-powered PR review system that posts summary and inline review comments on merge requests. It uses Restate for durable workflow orchestration, Pydantic AI for LLM-based review, and Qdrant for semantic code search.
 
-**Current status:** Phase 1 (MVP) complete. Phase 2 (Semantic Search & Context-Aware Review) complete — all subphases 2.1–2.11 done (webhooks, dispatch, debounce, draft tracking, repo syncer, indexer, file reader tool, search tool, full pipeline wiring, background indexing, e2e & smoke test updates). See `specs/phases.md` for the full roadmap, `specs/phase2-plan.md` for implementation details, and `specs/later.md` for known issues and deferred items.
+**Current status:** Phase 1 (MVP) and Phase 2 (Semantic Search & Context-Aware Review) complete. Work is now tracked via the task management system in `tasks/`. See `specs/phases.md` for historical roadmap and `specs/later.md` for known issues.
 
 Full technical design: `specs/overview.md`
 
 ## Extra instructions
 - always use gopls lsp plugin while working with golang code
 - always build binaries into `out` folder that is put to gitignore
-- when starting work on a phase, check that `.env` exists and has `ENCRYPTION_KEY` set to a non-empty value; if not, generate one with `python3 -c "import secrets; print(secrets.token_hex(32))"` and set it
-
-## Working on the current phase
-
-When asked to "work on current phase" (or similar), follow these steps:
-
-### 1. Determine the current phase
-
-Check in this order:
-1. **Git branch name** — look for a pattern like `phase-X-Y` (e.g. `phase-2-5` → phase 2, subphase 5).
-2. **Working directory name** — if running inside a git worktree, the folder may be named `nitai-phase-X-Y`.
-3. **Ask the user** if neither of the above gives a clear result.
-
-### 2. Read the phase plan and determine status
-
-Open `specs/phaseX-plan.md` and find the relevant subphase section. Check its status marker:
-
-- **`✓ Done`** — tell the user it is already complete and stop.
-- **`🚧 In progress`** — find the current progress by reading the code and continue implementing.
-- **`🧪 In test`** — tell the user it is in test and stop (no action yet).
-- **No marker / not started** — treat it as ready to begin.
-
-### 3. Before starting work
-
-Mark the subphase as `🚧 In progress` in `specs/phaseX-plan.md`.
-
-### 4. After completing work
-
-Mark the subphase as `🧪 In test` in `specs/phaseX-plan.md`, then follow the **Completing a subphase** steps above.
-
-## Completing a subphase
-
-When a subphase is implemented, do the following in order:
-
-1. **Update `specs/phases.md`** — set Phase N status to `In progress` (if not already), add the subphase to the `Completed` list. Keep notes brief; details belong in the phase plan file.
-2. **Update `specs/phaseN-plan.md`** — mark the subphase heading `✓ Done`, add an `### Implementation notes` section following the style in `phase1-plan.md`: use `**What changed from the plan:**` for deviations and `**Architectural decisions:**` for design choices made during implementation.
+- before starting work, check that `.env` exists and has `ENCRYPTION_KEY` set to a non-empty value; if not, generate one with `python3 -c "import secrets; print(secrets.token_hex(32))"` and set it
 
 ## Components
 
@@ -192,3 +157,26 @@ Three Go modules: `api-server/`, `go-services/`, `gen/go/`, linked by a `go.work
 ### Embedding
 
 OpenAI-compatible models (`text-embedding-3-small` / `text-embedding-3-large`) called via OpenRouter (`https://openrouter.ai/api/v1`).
+
+## Task Workflow
+
+This project uses a file-based task management system. All work is organized as task files (markdown with YAML frontmatter). The `TASKS_DIR` environment variable must be set to point to the tasks directory.
+
+Use the slash commands for agent workflows:
+- `/plan [task-id|next]` — find a `todo` task, write an implementation plan, mark it `ready`
+- `/implement [task-id|next]` — find a `ready` task, create a git worktree at `../<task-id>`, execute the plan there, mark it `in_review`
+
+### CLI Reference
+
+```bash
+task create "Name" [--type bug|feature|refactor] [--tags t1,t2] [--parent <id>]
+task list [--status STATUS] [--parent ID] [--blocked] [--assigned-to NAME] [--tag TAG]
+task show <id>
+task update <id> [--status STATUS] [--assigned-to NAME] [--blocked-by ID] [--remove-blocked-by ID]
+task next [--assigned-to NAME]
+task log <id> "message" [--section findings|changes|decisions]
+task log-show <id>
+task templates
+```
+
+Tasks, logs, and config are stored in `$TASKS_DIR/`.

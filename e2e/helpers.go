@@ -107,7 +107,9 @@ type TestClients struct {
 	Provider apiv1connect.ProviderServiceClient
 	Repo     apiv1connect.RepoServiceClient
 	Review   apiv1connect.ReviewServiceClient
+	Auth     apiv1connect.AuthServiceClient
 	BaseURL  string
+	Token    string // JWT token for authenticated requests
 }
 
 func NewTestClients(baseURL string) *TestClients {
@@ -116,8 +118,52 @@ func NewTestClients(baseURL string) *TestClients {
 		Provider: apiv1connect.NewProviderServiceClient(httpClient, baseURL),
 		Repo:     apiv1connect.NewRepoServiceClient(httpClient, baseURL),
 		Review:   apiv1connect.NewReviewServiceClient(httpClient, baseURL),
+		Auth:     apiv1connect.NewAuthServiceClient(httpClient, baseURL),
 		BaseURL:  baseURL,
 	}
+}
+
+// NewAuthenticatedTestClients creates clients that inject the Authorization header on every request.
+func NewAuthenticatedTestClients(baseURL, token string) *TestClients {
+	httpClient := &http.Client{
+		Transport: &authTransport{
+			base:  http.DefaultTransport,
+			token: token,
+		},
+	}
+	return &TestClients{
+		Provider: apiv1connect.NewProviderServiceClient(httpClient, baseURL),
+		Repo:     apiv1connect.NewRepoServiceClient(httpClient, baseURL),
+		Review:   apiv1connect.NewReviewServiceClient(httpClient, baseURL),
+		Auth:     apiv1connect.NewAuthServiceClient(httpClient, baseURL),
+		BaseURL:  baseURL,
+		Token:    token,
+	}
+}
+
+// authTransport is an http.RoundTripper that adds the Authorization header.
+type authTransport struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Authorization", "Bearer "+t.token)
+	return t.base.RoundTrip(req)
+}
+
+// RegisterTestUser registers a new test user and returns the JWT token.
+func RegisterTestUser(t testingT, baseURL string) string {
+	client := apiv1connect.NewAuthServiceClient(&http.Client{}, baseURL)
+	resp, err := client.Register(context.Background(),
+		connect.NewRequest(&apiv1.RegisterRequest{
+			Email:    "test@example.com",
+			Password: "testpassword123",
+		}))
+	if err != nil {
+		t.Fatalf("RegisterTestUser: %v", err)
+	}
+	return resp.Msg.Token
 }
 
 func PollReviewRun(
@@ -343,9 +389,11 @@ func StartStack(t testingT, gitlabMock *GitLabMock, llmMock *LLMMock) *E2EStack 
 
 	// Generate a random encryption key (32 bytes = 64 hex chars)
 	encryptionKey := generateHexKey(32)
+	// Generate a JWT secret (32 bytes = 64 hex chars)
+	jwtSecret := generateHexKey(32)
 
 	// Write temporary .env file (docker-compose.yml uses env_file: .env)
-	createdEnv := writeEnvFile(t, encryptionKey)
+	createdEnv := writeEnvFile(t, encryptionKey, jwtSecret)
 
 	// tc.Wait(true) passes --wait to docker compose, which treats any exited container
 	// (including one-shot init containers like restate-register) as a failure.
@@ -355,6 +403,7 @@ func StartStack(t testingT, gitlabMock *GitLabMock, llmMock *LLMMock) *E2EStack 
 			"OPENROUTER_API_KEY":  "test-key-not-used",
 			"OPENROUTER_BASE_URL": fmt.Sprintf("http://host.docker.internal:%s/v1", llmPort),
 			"ENCRYPTION_KEY":      encryptionKey,
+			"JWT_SECRET":          jwtSecret,
 			"REVIEW_MODEL":        "test-model",
 			"MAX_TOKENS":          "4096",
 			"EMBEDDING_MODEL":     "text-embedding-3-small",
@@ -370,13 +419,15 @@ func StartStack(t testingT, gitlabMock *GitLabMock, llmMock *LLMMock) *E2EStack 
 	waitForHTTP(t, "http://localhost:9070/health", 60*time.Second)
 	waitForRestateServices(t, "http://localhost:9070", 120*time.Second)
 
-	clients := NewTestClients("http://localhost:8090")
+	// Register a test user and create authenticated clients
+	token := RegisterTestUser(t, "http://localhost:8090")
+	authenticatedClients := NewAuthenticatedTestClients("http://localhost:8090", token)
 
 	return &E2EStack{
 		Compose:    stack,
 		GitLab:     gitlabMock,
 		LLM:        llmMock,
-		Clients:    clients,
+		Clients:    authenticatedClients,
 		createdEnv: createdEnv,
 	}
 }
@@ -399,19 +450,20 @@ func StopStack(t testingT, stack *E2EStack) {
 
 // writeEnvFile creates a .env file in the repo root with required vars.
 // Returns true if a new file was created (vs. an existing one being skipped).
-func writeEnvFile(t testingT, encryptionKey string) bool {
+func writeEnvFile(t testingT, encryptionKey, jwtSecret string) bool {
 	envPath := "../.env"
 	// Don't overwrite existing .env
 	if _, err := os.Stat(envPath); err == nil {
-		t.Logf("using existing .env file — ensure it has ENCRYPTION_KEY, REVIEW_MODEL, EMBEDDING_MODEL set")
+		t.Logf("using existing .env file — ensure it has ENCRYPTION_KEY, JWT_SECRET, REVIEW_MODEL, EMBEDDING_MODEL set")
 		return false
 	}
 	content := fmt.Sprintf(`OPENROUTER_API_KEY=test-key-not-used
 ENCRYPTION_KEY=%s
+JWT_SECRET=%s
 REVIEW_MODEL=test-model
 MAX_TOKENS=4096
 EMBEDDING_MODEL=text-embedding-3-small
-`, encryptionKey)
+`, encryptionKey, jwtSecret)
 	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
 		t.Fatalf("writing .env file: %v", err)
 	}

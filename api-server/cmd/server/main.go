@@ -16,13 +16,14 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
-	"ai-reviewer/gen/api/v1/apiv1connect"
-	apimigrations "ai-reviewer/api-server/migrations"
+	"ai-reviewer/api-server/internal/auth"
 	"ai-reviewer/api-server/internal/config"
 	"ai-reviewer/api-server/internal/crypto"
 	"ai-reviewer/api-server/internal/db"
 	"ai-reviewer/api-server/internal/handler"
 	"ai-reviewer/api-server/internal/restate"
+	apimigrations "ai-reviewer/api-server/migrations"
+	"ai-reviewer/gen/api/v1/apiv1connect"
 )
 
 func main() {
@@ -39,6 +40,9 @@ func main() {
 	}
 	if cfg.RestateAdminURL == "" {
 		log.Fatal("RESTATE_ADMIN_URL is required")
+	}
+	if cfg.JWTSecret == "" {
+		log.Fatal("JWT_SECRET is required")
 	}
 
 	encKey, err := crypto.DecodeKey(cfg.EncryptionKey)
@@ -81,13 +85,19 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	authInterceptor := auth.NewAuthInterceptor(cfg.JWTSecret)
+
 	providerHandler := handler.NewProviderHandler(pool, encKey)
 	repoHandler := handler.NewRepoHandler(pool, restateClient)
 	reviewHandler := handler.NewReviewHandler(pool, restateClient)
+	authHandler := handler.NewAuthHandler(pool, cfg.JWTSecret)
 
-	mux.Handle(apiv1connect.NewProviderServiceHandler(providerHandler, connect.WithRecover(recoverHandler)))
-	mux.Handle(apiv1connect.NewRepoServiceHandler(repoHandler, connect.WithRecover(recoverHandler)))
-	mux.Handle(apiv1connect.NewReviewServiceHandler(reviewHandler, connect.WithRecover(recoverHandler)))
+	interceptorOpt := connect.WithInterceptors(authInterceptor)
+	recoverOpt := connect.WithRecover(recoverHandler)
+	mux.Handle(apiv1connect.NewAuthServiceHandler(authHandler, interceptorOpt, recoverOpt))
+	mux.Handle(apiv1connect.NewProviderServiceHandler(providerHandler, interceptorOpt, recoverOpt))
+	mux.Handle(apiv1connect.NewRepoServiceHandler(repoHandler, interceptorOpt, recoverOpt))
+	mux.Handle(apiv1connect.NewReviewServiceHandler(reviewHandler, interceptorOpt, recoverOpt))
 	mux.Handle("/webhooks/", handler.NewWebhookHandler(&handler.PoolWebhookStore{Pool: pool}, restateClient))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

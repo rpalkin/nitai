@@ -13,7 +13,9 @@ Full technical design: `specs/overview.md`
 ## Extra instructions
 - always use gopls lsp plugin while working with golang code
 - always build binaries into `out` folder that is put to gitignore
-- before starting work, check that `.env` exists and has `ENCRYPTION_KEY` set to a non-empty value; if not, generate one with `python3 -c "import secrets; print(secrets.token_hex(32))"` and set it
+- before starting work, check that `.env` exists and has `ENCRYPTION_KEY` and `JWT_SECRET` set to non-empty values; if not, generate them:
+  - `ENCRYPTION_KEY`: `python3 -c "import secrets; print(secrets.token_hex(32))"`
+  - `JWT_SECRET`: `python3 -c "import secrets; print(secrets.token_hex(32))"`
 
 ## Components
 
@@ -26,7 +28,7 @@ Each component has its own `CLAUDE.md` with detailed architecture and commands:
 | [reviewer](reviewer/) | Python Restate service — Pydantic AI agent with tools (search + file reader), LLM-based code review | [reviewer/CLAUDE.md](reviewer/CLAUDE.md) |
 | [indexer](indexer/) | Python Restate service — indexes Git repos (bare clones) into Qdrant with tree-sitter chunking | [indexer/CLAUDE.md](indexer/CLAUDE.md) |
 | [search-mcp](search-mcp/) | Python FastMCP server — semantic code search over Qdrant | [search-mcp/CLAUDE.md](search-mcp/CLAUDE.md) |
-| [proto](proto/) | Protobuf API definitions (provider, repo, review services) | — |
+| [proto](proto/) | Protobuf API definitions (auth, provider, repo, review services) | — |
 | [gen](gen/) | Generated Go code from protobuf (shared module) | — |
 | [e2e](e2e/) | Go e2e test suite — full-stack tests with mock GitLab + LLM servers | [e2e/CLAUDE.md](e2e/CLAUDE.md) |
 

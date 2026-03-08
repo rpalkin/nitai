@@ -1,11 +1,16 @@
-.PHONY: proto up down logs smoke e2e unit
+.PHONY: proto vendor up down logs smoke e2e unit
 
 proto:
 	buf lint
 	buf generate
 	cd gen/go && go mod tidy
 
-up:
+vendor: proto
+	cd api-server && GOWORK=off go mod vendor
+	cd go-services && GOWORK=off go mod vendor
+	cd e2e && GOWORK=off go mod vendor
+
+up: vendor
 	docker compose up -d --build
 
 down:
@@ -17,7 +22,7 @@ logs:
 smoke:
 	./tests/smoke.sh
 
-e2e:
+e2e: vendor
 	@echo "=== Cleaning all test data for fresh e2e run ==="
 	@echo "Removing Docker volumes..."
 	docker volume rm e2e_restate-e2e-data 2>/dev/null || true

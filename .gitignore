@@ -39,3 +39,8 @@ specs/REVIEW.md
 # OpenCode plugin dependencies
 .opencode/node_modules/
 .opencode/bun.lock
+
+# Go vendor directories (populated via `make vendor`)
+api-server/vendor/
+go-services/vendor/
+e2e/vendor/

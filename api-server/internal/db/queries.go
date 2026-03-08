@@ -419,3 +419,70 @@ func GetReviewComments(ctx context.Context, pool *pgxpool.Pool, reviewRunID stri
 	}
 	return comments, rows.Err()
 }
+
+// UserRow holds user data from the users table.
+type UserRow struct {
+	ID           string
+	OrgID        string
+	Email        string
+	PasswordHash string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// InsertUser inserts a new user and returns the row.
+func InsertUser(ctx context.Context, pool *pgxpool.Pool, orgID, email, passwordHash string) (*UserRow, error) {
+	const q = `
+		INSERT INTO users (org_id, email, password_hash)
+		VALUES ($1, $2, $3)
+		RETURNING id, org_id, email, password_hash, created_at, updated_at`
+
+	row := &UserRow{}
+	err := pool.QueryRow(ctx, q, orgID, email, passwordHash).Scan(
+		&row.ID, &row.OrgID, &row.Email, &row.PasswordHash, &row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("InsertUser: %w", err)
+	}
+	return row, nil
+}
+
+// GetUserByEmail fetches a user by email.
+func GetUserByEmail(ctx context.Context, pool *pgxpool.Pool, email string) (*UserRow, error) {
+	const q = `
+		SELECT id, org_id, email, password_hash, created_at, updated_at
+		FROM users
+		WHERE email = $1`
+
+	row := &UserRow{}
+	err := pool.QueryRow(ctx, q, email).Scan(
+		&row.ID, &row.OrgID, &row.Email, &row.PasswordHash, &row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, pgx.ErrNoRows
+		}
+		return nil, fmt.Errorf("GetUserByEmail: %w", err)
+	}
+	return row, nil
+}
+
+// GetUserByID fetches a user by ID.
+func GetUserByID(ctx context.Context, pool *pgxpool.Pool, id string) (*UserRow, error) {
+	const q = `
+		SELECT id, org_id, email, password_hash, created_at, updated_at
+		FROM users
+		WHERE id = $1`
+
+	row := &UserRow{}
+	err := pool.QueryRow(ctx, q, id).Scan(
+		&row.ID, &row.OrgID, &row.Email, &row.PasswordHash, &row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, pgx.ErrNoRows
+		}
+		return nil, fmt.Errorf("GetUserByID: %w", err)
+	}
+	return row, nil
+}

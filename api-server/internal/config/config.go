@@ -9,6 +9,7 @@ type Config struct {
 	RestateIngressURL string
 	RestateAdminURL   string
 	ListenAddr        string
+	JWTSecret         string
 }
 
 // Load reads configuration from environment variables.
@@ -23,5 +24,6 @@ func Load() Config {
 		RestateIngressURL: os.Getenv("RESTATE_INGRESS_URL"),
 		RestateAdminURL:   os.Getenv("RESTATE_ADMIN_URL"),
 		ListenAddr:        addr,
+		JWTSecret:         os.Getenv("JWT_SECRET"),
 	}
 }

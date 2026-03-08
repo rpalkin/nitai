@@ -1,0 +1,41 @@
+syntax = "proto3";
+package api.v1;
+option go_package = "ai-reviewer/gen/api/v1;apiv1";
+
+message User {
+  string id = 1;
+  string org_id = 2;
+  string email = 3;
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message RegisterResponse {
+  string token = 1;
+  User user = 2;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string token = 1;
+  User user = 2;
+}
+
+message GetMeRequest {}
+
+message GetMeResponse {
+  User user = 1;
+}
+
+service AuthService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc GetMe(GetMeRequest) returns (GetMeResponse);
+}

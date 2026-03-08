@@ -184,6 +184,7 @@ services:
       LISTEN_ADDR: ":8090"
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_ADMIN_URL: http://restate:9070
+      JWT_SECRET: ${JWT_SECRET}
     ports:
       - "8090:8090"
 

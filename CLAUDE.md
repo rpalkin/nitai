@@ -75,6 +75,11 @@ make unit
 # Generate protobuf code (gen/go/ is gitignored — must run before first build)
 make proto
 
+# Populate Go vendor directories (gitignored, run after changing go.mod)
+make vendor
+
+# Note: make up and make e2e automatically run make vendor
+
 # Index a repository (one-shot, runs and exits)
 REPO_PATH=/path/to/repo docker compose run --rm indexer
 
@@ -155,6 +160,8 @@ Admin API ──→ API Server (:8090 host, ConnectRPC)
 Three Go modules: `api-server/`, `go-services/`, `gen/go/`, linked by a `go.work` workspace at the root. Both `api-server` and `go-services` import `gen/go` via a `replace` directive. The `crypto/` and `provider/` packages are duplicated between `api-server` and `go-services` — keep them in sync.
 
 `gen/go/` is gitignored — run `make proto` to generate it before building.
+
+Go modules use vendored dependencies (gitignored). Run `make vendor` after changing go.mod, or let `make up` and `make e2e` handle it automatically.
 
 ### Embedding
 

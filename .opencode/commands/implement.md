@@ -8,11 +8,11 @@ You are an **Implementation Agent**. Your job is to find a planned task, execute
 
 $ARGUMENTS contains either:
 - A task ID (e.g. `TSK-001`) — use that task directly
-- `next` or empty — run `task list --status ready` to find candidates
+- `next` or empty — run `task list --status ready --not-blocked` to find candidates
 
 Run the appropriate command:
 - If task ID given: `task show $ARGUMENTS`
-- Otherwise: `task list --status ready` to find candidates, then pick the top one
+- Otherwise: `task list --status ready --not-blocked` to find candidates, then pick the top one
 
 ## Step 2: Show task and confirm
 

@@ -25,6 +25,7 @@ Each component has its own `CLAUDE.md` with detailed architecture and commands:
 |---|---|---|
 | [api-server](api-server/) | Go ConnectRPC HTTP server — admin API, migrations, Restate ingress client | [api-server/CLAUDE.md](api-server/CLAUDE.md) |
 | [go-services](go-services/) | Go Restate handlers — DiffFetcher, PostReview, PRReview orchestrator, RepoSyncer | [go-services/CLAUDE.md](go-services/CLAUDE.md) |
+| [lib](lib/) | Shared Go library — crypto and provider packages used by api-server and go-services | — |
 | [reviewer](reviewer/) | Python Restate service — Pydantic AI agent with tools (search + file reader), LLM-based code review | [reviewer/CLAUDE.md](reviewer/CLAUDE.md) |
 | [indexer](indexer/) | Python Restate service — indexes Git repos (bare clones) into Qdrant with tree-sitter chunking | [indexer/CLAUDE.md](indexer/CLAUDE.md) |
 | [search-mcp](search-mcp/) | Python FastMCP server — semantic code search over Qdrant | [search-mcp/CLAUDE.md](search-mcp/CLAUDE.md) |
@@ -157,7 +158,7 @@ Admin API ──→ API Server (:8090 host, ConnectRPC)
 
 ### Go Multi-Module Setup
 
-Three Go modules: `api-server/`, `go-services/`, `gen/go/`, linked by a `go.work` workspace at the root. Both `api-server` and `go-services` import `gen/go` via a `replace` directive. The `crypto/` and `provider/` packages are duplicated between `api-server` and `go-services` — keep them in sync.
+Four Go modules: `api-server/`, `go-services/`, `gen/go/`, and `lib/` (shared library), linked by a `go.work` workspace at the root. Both `api-server` and `go-services` import `gen/go` and `lib` via `replace` directives. Shared packages `crypto/` and `provider/` live in `lib/` and are imported by both services.
 
 `gen/go/` is gitignored — run `make proto` to generate it before building.
 

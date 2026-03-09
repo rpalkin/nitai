@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ai-reviewer/go-services/internal/provider"
+	"ai-reviewer/lib/provider"
 )
 
 // Client is a GitLab REST API v4 client.

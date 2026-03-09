@@ -44,3 +44,4 @@ specs/REVIEW.md
 api-server/vendor/
 go-services/vendor/
 e2e/vendor/
+lib/vendor/

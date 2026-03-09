@@ -51,7 +51,6 @@ docker compose up worker
 ### Internal Packages
 
 - **`config/`** — env var loading
-- **`crypto/`** — AES-256-GCM encrypt/decrypt (copy of `api-server/internal/crypto/`, keep in sync)
 - **`db/`** — pgx pool wrapper + hand-written query functions in `queries.go` (includes `GetBranchIndex`, `UpsertBranchIndex` for indexer state tracking)
 - **`difffetcher/`** — `DiffFetcher` Restate service. Decrypts provider token, fetches MR details + diff via GitLab client. Also handles diff-hash dedup (compares HeadSHA against latest completed review).
 - **`postreview/`** — `PostReview` Restate service. Posts summary + inline comments, updates DB with `provider_comment_id`.
@@ -59,12 +58,10 @@ docker compose up worker
 - **`indexmainbranch/`** — `IndexMainBranch` Virtual Object. Background indexing loop for the primary branch. Keyed by `<repo_id>`. Syncs repo → indexes → self-schedules every 6h via `restate.ObjectSend` with delay. Triggered by `EnableReview`. Stops if `review_enabled` is false.
 - **`prreview/`** — `PRReview` Virtual Object. Full Phase 2 orchestrator: smart debounce → DiffFetcher (details + dedup) → draft guard → RepoSyncer → Indexer (Python, cross-language) → Reviewer (Python, cross-language, with `repo_path`, `target_branch_sha`, `search_collection`) → PostReview. Uses Virtual Object state for debounce timing (`last_started_at`, `last_completed_at`).
 - **`reposyncer/`** — `RepoSyncer` Restate service. Maintains bare git clones via `go-git` (pure Go, no shell-out). Handles clone, fetch, and remote URL updates. Returns `head_sha` for the target branch.
-- **`provider/`** — `GitProvider` interface + GitLab REST API v4 implementation (hand-rolled HTTP, no go-gitlab library)
-  - `provider.go` — interface definition + sentinel errors (`ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`, `ErrRateLimited`)
-  - `gitlab/gitlab.go` — implementation: `ListRepos`, `GetMRDiff`, `GetMRDetails`, `PostComment`, `PostInlineComment`
-  - `gitlab/types.go` — response types
-  - `gitlab/gitlab_test.go` — 15 unit tests using `httptest.NewServer`
-  - `gitlab/integration_test.go` — tests against real GitLab (skipped without env vars)
+
+### External Dependencies
+
+- **`ai-reviewer/lib`** — Shared Go library providing `crypto/` (AES-256-GCM encrypt/decrypt) and `provider/` + `provider/gitlab` (GitProvider interface + GitLab REST API v4 implementation). Imported via `replace` directive in `go.mod`.
 
 ### Key Design Decisions
 

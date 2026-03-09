@@ -11,9 +11,9 @@ type gitlabProject struct {
 
 // gitlabMR maps the response from GET /api/v4/projects/:id/merge_requests/:iid.
 type gitlabMR struct {
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	Author       struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Author      struct {
 		Username string `json:"username"`
 	} `json:"author"`
 	SourceBranch string `json:"source_branch"`

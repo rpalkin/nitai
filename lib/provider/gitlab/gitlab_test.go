@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"ai-reviewer/go-services/internal/provider"
+	"ai-reviewer/lib/provider"
 )
 
 // newTestServer creates an httptest server with the given handler map.

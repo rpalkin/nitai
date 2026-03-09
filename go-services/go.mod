@@ -2,9 +2,13 @@ module ai-reviewer/go-services
 
 go 1.24.0
 
-replace ai-reviewer/gen => ../gen/go
+replace (
+	ai-reviewer/gen => ../gen/go
+	ai-reviewer/lib => ../lib
+)
 
 require (
+	ai-reviewer/lib v0.0.0
 	github.com/go-git/go-git/v5 v5.17.0
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/restatedev/sdk-go v0.23.0

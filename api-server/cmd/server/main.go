@@ -18,12 +18,12 @@ import (
 
 	"ai-reviewer/api-server/internal/auth"
 	"ai-reviewer/api-server/internal/config"
-	"ai-reviewer/api-server/internal/crypto"
 	"ai-reviewer/api-server/internal/db"
 	"ai-reviewer/api-server/internal/handler"
 	"ai-reviewer/api-server/internal/restate"
 	apimigrations "ai-reviewer/api-server/migrations"
 	"ai-reviewer/gen/api/v1/apiv1connect"
+	"ai-reviewer/lib/crypto"
 )
 
 func main() {

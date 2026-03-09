@@ -4,13 +4,13 @@ import (
 	"errors"
 	"fmt"
 
-	restate "github.com/restatedev/sdk-go"
 	"github.com/jackc/pgx/v5/pgxpool"
+	restate "github.com/restatedev/sdk-go"
 
-	"ai-reviewer/go-services/internal/crypto"
 	"ai-reviewer/go-services/internal/db"
-	"ai-reviewer/go-services/internal/provider"
-	"ai-reviewer/go-services/internal/provider/gitlab"
+	"ai-reviewer/lib/crypto"
+	"ai-reviewer/lib/provider"
+	"ai-reviewer/lib/provider/gitlab"
 )
 
 const maxChangedLines = 5000

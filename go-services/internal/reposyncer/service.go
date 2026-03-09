@@ -17,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	restate "github.com/restatedev/sdk-go"
 
-	"ai-reviewer/go-services/internal/crypto"
 	"ai-reviewer/go-services/internal/db"
+	"ai-reviewer/lib/crypto"
 )
 
 const reposBase = "/data/repos"

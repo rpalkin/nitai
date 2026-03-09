@@ -11,11 +11,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"ai-reviewer/api-server/internal/db"
 	apiv1 "ai-reviewer/gen/api/v1"
 	"ai-reviewer/gen/api/v1/apiv1connect"
-	"ai-reviewer/api-server/internal/crypto"
-	"ai-reviewer/api-server/internal/db"
-	"ai-reviewer/api-server/internal/provider/gitlab"
+	"ai-reviewer/lib/crypto"
+	"ai-reviewer/lib/provider/gitlab"
 )
 
 // insertProviderTx wraps InsertProvider + UpsertRepos in a single transaction.

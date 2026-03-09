@@ -10,13 +10,13 @@ import (
 	"github.com/restatedev/sdk-go/server"
 
 	"ai-reviewer/go-services/internal/config"
-	"ai-reviewer/go-services/internal/crypto"
 	"ai-reviewer/go-services/internal/db"
 	"ai-reviewer/go-services/internal/difffetcher"
 	"ai-reviewer/go-services/internal/indexmainbranch"
 	"ai-reviewer/go-services/internal/postreview"
 	"ai-reviewer/go-services/internal/prreview"
 	"ai-reviewer/go-services/internal/reposyncer"
+	"ai-reviewer/lib/crypto"
 )
 
 func main() {

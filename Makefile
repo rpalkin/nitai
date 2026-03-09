@@ -6,6 +6,7 @@ proto:
 	cd gen/go && go mod tidy
 
 vendor: proto
+	cd lib && go mod tidy
 	cd api-server && GOWORK=off go mod vendor
 	cd go-services && GOWORK=off go mod vendor
 	cd e2e && GOWORK=off go mod vendor

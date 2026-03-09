@@ -1,10 +1,15 @@
 # Build stage
 FROM golang:1.24-alpine AS builder
 
-WORKDIR /workspace/api-server
+WORKDIR /workspace
+
+# Copy lib/ first (shared dependency)
+COPY lib/ ./lib/
 
 # Copy api-server source (includes vendor directory)
-COPY api-server/ .
+COPY api-server/ ./api-server/
+
+WORKDIR /workspace/api-server
 
 RUN go build -mod=vendor -o /api-server ./cmd/server
 

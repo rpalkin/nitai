@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	ai-reviewer/gen v0.0.0
+	ai-reviewer/lib v0.0.0
 	connectrpc.com/connect v1.19.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.18.3
@@ -25,4 +26,7 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 )
 
-replace ai-reviewer/gen => ../gen/go
+replace (
+	ai-reviewer/gen => ../gen/go
+	ai-reviewer/lib => ../lib
+)

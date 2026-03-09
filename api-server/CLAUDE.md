@@ -44,7 +44,6 @@ make proto
   - `jwt.go` — HS256 token signing with 24h expiry, claims: user_id, org_id
   - `interceptor.go` — ConnectRPC unary interceptor with allow-list for unauthenticated endpoints (Register, Login)
 - **`config/`** — env var loading
-- **`crypto/`** — AES-256-GCM encrypt/decrypt (copy of `go-services/internal/crypto/`, keep in sync)
 - **`db/`** — pgx pool wrapper and hand-written queries
 - **`handler/`** — ConnectRPC handler implementations:
   - `auth.go` — `Register` (bcrypt password hashing, default org assignment), `Login` (credential verification), `GetMe` (authenticated user lookup)
@@ -53,8 +52,11 @@ make proto
   - `review.go` — `TriggerReview` (creates review_run row, fires PRReview via Restate `/send`), `GetReviewRun`
   - `webhook.go` — `POST /webhooks/{provider_id}` handler for GitLab MR events. Validates `X-Gitlab-Token`, filters non-MR/non-reviewable actions, handles draft→ready transitions, cancels existing invocations (debounce), dispatches via Restate. Uses `WebhookStore` and `RestateDispatcher` interfaces for testability.
   - `mapper.go` — DB row to protobuf response mapping
-- **`provider/`** — `GitProvider` interface + GitLab implementation (copy of `go-services/internal/provider/`, keep in sync). Only `ListRepos` is used here.
 - **`restate/`** — HTTP client for Restate ingress and admin API. `SendPRReview` posts fire-and-forget to `/PRReview/{key}/Run/send` (202). `CancelInvocation` patches `/invocations/{id}/cancel` via admin API (404 silently ignored).
+
+### External Dependencies
+
+- **`ai-reviewer/lib`** — Shared Go library providing `crypto/` (AES-256-GCM encrypt/decrypt) and `provider/gitlab` (GitLab API client) packages. Imported via `replace` directive in `go.mod`.
 
 ### Migrations
 

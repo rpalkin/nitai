@@ -21,6 +21,11 @@ logs:
 	docker compose logs -f
 
 smoke:
+	@echo "=== Cleaning up stale volumes before smoke test ==="
+	docker compose down -v --remove-orphans 2>/dev/null || true
+	@PROJECT_NAME=$$(basename "$$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g'); \
+	docker volume ls -q | grep "^$${PROJECT_NAME}_" | xargs -r docker volume rm 2>/dev/null || true
+	@echo "=== Running smoke tests ==="
 	./tests/smoke.sh
 
 e2e: vendor

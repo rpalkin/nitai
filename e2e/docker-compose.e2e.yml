@@ -9,6 +9,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
   worker:
+    environment:
+      DEBOUNCE_TIMEOUT: "5s"
     extra_hosts:
       - "host.docker.internal:host-gateway"
   api-server:

@@ -5,7 +5,7 @@ services:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      - ./db:/qdrant/storage
+      - qdrant-data:/qdrant/storage
 
   search-mcp:
     build: ./search-mcp
@@ -47,7 +47,7 @@ services:
       POSTGRES_USER: ai_reviewer
       POSTGRES_PASSWORD: ai_reviewer
     volumes:
-      - ./pgdata:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ai_reviewer -d ai_reviewer"]
       interval: 5s
@@ -73,7 +73,7 @@ services:
       - "9070:9070"   # admin API
       - "9071:9071"   # UI
     volumes:
-      - ./restate-data:/restate-data
+      - restate-data:/restate-data
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9070/health"]
       interval: 5s
@@ -190,3 +190,6 @@ services:
 
 volumes:
   repos:
+  qdrant-data:
+  postgres-data:
+  restate-data:

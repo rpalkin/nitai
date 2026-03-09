@@ -1751,7 +1751,7 @@ func TestReReviewOnNewPush(t *testing.T) {
 }
 
 // TestCancelOnNewPush verifies that a new webhook while a review is in-flight cancels the first
-// and only the second review completes (after 3-min debounce).
+// and only the second review completes (after debounce).
 func TestCancelOnNewPush(t *testing.T) {
 	gitlab.SetMR("100", "1", &MRConfig{
 		Details: json.RawMessage(`{
@@ -1857,8 +1857,8 @@ func TestCancelOnNewPush(t *testing.T) {
 		t.Log("warning: first LLM call did not return within 5s")
 	}
 
-	// Wait for the second review to complete (after 3-min debounce + review pipeline).
-	WaitForReviewRun(t, repoID, 1, "completed", 300*time.Second)
+	// Wait for the second review to complete (after debounce + review pipeline).
+	WaitForReviewRun(t, repoID, 1, "completed", 60*time.Second)
 
 	// Only one review should have completed successfully.
 	// The first invocation was cancelled by Restate and should not complete.
@@ -2222,7 +2222,7 @@ func TestClosedMergedMRIgnored(t *testing.T) {
 }
 
 // TestDebounceRapidPushes verifies two rapid webhooks (different SHAs) collapse to one review.
-// The second webhook cancels the first in-flight review; the resulting review debounces for 3 min.
+// The second webhook cancels the first in-flight review; the resulting review debounces.
 func TestDebounceRapidPushes(t *testing.T) {
 	gitlab.SetMR("100", "1", &MRConfig{
 		Details: json.RawMessage(`{
@@ -2285,8 +2285,8 @@ func TestDebounceRapidPushes(t *testing.T) {
 	})
 	resp2.Body.Close()
 
-	// Wait for the single completed review (second, after 3-min debounce)
-	WaitForReviewRun(t, repoID, 1, "completed", 300*time.Second)
+	// Wait for the single completed review (second, after debounce)
+	WaitForReviewRun(t, repoID, 1, "completed", 60*time.Second)
 
 	runs := QueryReviewRuns(t, repoID, 1)
 	completedCount := 0

@@ -35,12 +35,25 @@ func isCancellationError(err error) bool {
 // PRReview is a Restate Virtual Object that orchestrates the full PR review pipeline.
 // It is keyed by "<repo_id>-<mr_number>" to ensure one active review per PR at a time.
 type PRReview struct {
-	pool *pgxpool.Pool
+	pool            *pgxpool.Pool
+	debounceTimeout time.Duration
+}
+
+// Option is a functional option for PRReview.
+type Option func(*PRReview)
+
+// WithDebounceTimeout sets the debounce timeout for PRReview.
+func WithDebounceTimeout(d time.Duration) Option {
+	return func(p *PRReview) { p.debounceTimeout = d }
 }
 
 // New creates a new PRReview virtual object.
-func New(pool *pgxpool.Pool) *PRReview {
-	return &PRReview{pool: pool}
+func New(pool *pgxpool.Pool, opts ...Option) *PRReview {
+	p := &PRReview{pool: pool, debounceTimeout: 3 * time.Minute}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
 }
 
 // RunRequest is the input for Run.
@@ -102,9 +115,9 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		}
 	}()
 
-	if lastStarted > 0 && lastCompleted != lastStarted && (now-lastStarted) < 3*60*1000 {
+	if lastStarted > 0 && lastCompleted != lastStarted && (now-lastStarted) < p.debounceTimeout.Milliseconds() {
 		// A recent invocation was cancelled — debounce before proceeding.
-		if err := restate.Sleep(ctx, 3*time.Minute); err != nil {
+		if err := restate.Sleep(ctx, p.debounceTimeout); err != nil {
 			return "", err
 		}
 	}

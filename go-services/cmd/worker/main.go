@@ -50,7 +50,7 @@ func main() {
 
 	diffFetcher := difffetcher.New(pool, encKey)
 	postReviewSvc := postreview.New(pool, encKey)
-	prReviewSvc := prreview.New(pool)
+	prReviewSvc := prreview.New(pool, prreview.WithDebounceTimeout(cfg.DebounceTimeout))
 	repoSyncerSvc := reposyncer.New(pool, encKey)
 	indexMainBranchSvc := indexmainbranch.New(pool)
 

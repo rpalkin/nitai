@@ -31,6 +31,7 @@ docker compose up worker
 - `DATABASE_URL` — PostgreSQL connection string (required)
 - `ENCRYPTION_KEY` — 32-byte hex-encoded AES-256-GCM key (required)
 - `WORKER_ADDR` — Restate HTTP listen address (default `:9080`)
+- `DEBOUNCE_TIMEOUT` — Duration string for PRReview debounce sleep (default `3m`, e2e uses `5s`)
 
 ## Architecture
 
@@ -71,7 +72,7 @@ docker compose up worker
 - **DiffFetcher reads credentials from DB** — encrypted token bytes stay out of Restate's durable journal
 - **No retries in provider layer** — Restate handles all retry logic
 - **`newProvider()` and `classifyProviderError()` duplicated** in difffetcher and postreview (~10 lines each, acceptable at this scale)
-- **Smart debounce** — `PRReview.Run` uses Virtual Object state (`last_started_at`) to debounce: only sleeps 3 minutes when a previous invocation started recently. First webhook trigger proceeds immediately with zero delay.
+- **Smart debounce** — `PRReview.Run` uses Virtual Object state (`last_started_at`) to debounce: only sleeps when a previous invocation started recently (configurable via `DEBOUNCE_TIMEOUT`, default 3m). First webhook trigger proceeds immediately with zero delay.
 - **HeadSHA as diff hash** — uses `details.HeadSHA` (git commit SHA) directly instead of SHA-256 of the diff content. Enables early exit without fetching the full diff: `GetMRDetails` is called before `GetMRDiff`.
 - **Force flag** — `PRReviewRequest.Force` propagates to `FetchRequest.Force`. API-triggered reviews (`TriggerReview`) set `Force: true` (always run); webhook-triggered reviews leave it `false` (dedup enabled).
 - **Diff-hash dedup** — if `HeadSHA` matches the latest completed review for the same repo+MR and `Force == false`, the run is marked `skipped` and exits early.

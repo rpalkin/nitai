@@ -118,9 +118,9 @@ Each test case should:
 | `TestZeroInlineComments` | Clean diff → summary posted, no discussions (spec F). |
 | `TestInvalidTokenAtReviewTime` | GitLab 401 at review time → FAILED (spec G). |
 | `TestClosedMergedMRIgnored` | action=close/merge → no review run (spec H). |
-| `TestDebounceRapidPushes` | Two rapid webhooks, different SHAs → one review after 3-min debounce (spec I). |
+| `TestDebounceRapidPushes` | Two rapid webhooks, different SHAs → one review after debounce (spec I). |
 | `TestSingleRunPerWebhookReview` | Webhook-triggered review creates exactly ONE run with invocation ID set (regression test). |
 | `TestMalformedWebhookBody` | Invalid JSON body → 4xx or 200, no review run (spec M). |
 | `TestManyInlineComments` | 50 inline comments all posted to GitLab (spec N). |
 
-**Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the 3-minute debounce and take ~4 min each. The suite timeout is 900s.
+**Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the debounce (configured via `DEBOUNCE_TIMEOUT=5s` in e2e). They complete in seconds instead of minutes. The suite timeout is 300s.

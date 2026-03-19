@@ -1,4 +1,4 @@
-# AI Reviewer — Design Review: Deferred Items
+# Backlog — Deferred Items & Known Issues
 
 Items identified during design review to address in future iterations.
 

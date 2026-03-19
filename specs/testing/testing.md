@@ -1,4 +1,15 @@
-# E2E Test Cases
+# Testing
+
+End-to-end and unit test coverage for ai-reviewer.
+
+## Test Strategy
+
+- **E2E:** testcontainers-go with mock GitLab + LLM servers — full stack integration tests
+- **Unit:** `make unit`, `tests/unit.sh` — Go package tests
+- **Smoke:** `tests/smoke.sh` — verifies Restate registration and service health
+- **Live mode:** `E2E_LIVE=1` — runs against real GitLab instance
+
+## E2E Test Cases
 
 All planned end-to-end test cases for ai-reviewer. Cases 1–13 were designed by the planner based on codebase analysis. Cases A–O were identified by a product review of user-facing scenarios.
 
@@ -19,7 +30,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
   - `GET /api/v4/projects` → project list with one repo
   - `GET /api/v4/projects/:id/merge_requests/:iid` → MR details (not draft, not merged)
   - `GET /api/v4/projects/:id/merge_requests/:iid/changes` → small diff
-  - `GET /api/v4/projects/:id/merge_requests/:iid/versions` → version list
+  - `GET /api/v4/projects/:id/merge_requests/:iid/versions`→ version list
   - `POST /api/v4/projects/:id/merge_requests/:iid/notes` → 200 OK (records call)
   - `POST /api/v4/projects/:id/merge_requests/:iid/discussions` → 200 OK (records call)
 - Mock LLM server running, returning a valid `ReviewResponse` via tool calling format
@@ -33,7 +44,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 **Assertions:**
 - `GetReviewRun` returns status = COMPLETED
-- `review_comments` table has ≥ 1 row with the expected `body` content
+- `review_comments` table has≥ 1 row with the expected `body` content
 - Mock GitLab received exactly 1 POST to `/notes` (summary)
 - Mock GitLab received ≥ 1 POST to `/discussions` (inline comments)
 - Inline comment position: `new_path` matches expected file, `new_line` matches expected line
@@ -306,7 +317,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 
 **Steps:**
 1. Register provider + enable review
-2. Send webhook for push v1 — review starts (in debounce or running)
+2. Send webhook for push v1— review starts (in debounce or running)
 3. Immediately send webhook for push v2 (different diff hash)
 4. Wait for all invocations to settle
 
@@ -521,7 +532,7 @@ Tests marked `[DONE]` have test code written in `e2e/e2e_test.go` and all pass (
 |---|---|---|
 | 1–13 | 13 | Original planner cases |
 | A–O | 15 | Product review gaps |
-| **Total** | **28** | |
+| **Total** | **28** ||
 
 | Status | Count |
 |---|---|

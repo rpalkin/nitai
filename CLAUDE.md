@@ -6,9 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `ai-reviewer` is a self-hosted AI-powered PR review system that posts summary and inline review comments on merge requests. It uses Restate for durable workflow orchestration, Pydantic AI for LLM-based review, and Qdrant for semantic code search.
 
-**Current status:** Phase 1 (MVP) and Phase 2 (Semantic Search & Context-Aware Review) complete. Work is now tracked via the task management system in `tasks/`. See `specs/phases.md` for historical roadmap and `specs/later.md` for known issues.
+**Current status:** Phase 1 (MVP) and Phase 2 (Semantic Search & Context-Aware Review) complete. Work is now tracked via the task management system in `tasks/`. See `specs/plans/` for historical roadmap and `specs/backlog.md` for known issues.
 
-Full technical design: `specs/overview.md`
+## Specs
+
+Domain-specific architectural documentation:
+
+| Domain | Description | Spec |
+|---|---|---|
+| Review Pipeline | PRReview workflow, debounce, dedup, posting, custom instructions | [specs/review-pipeline/](specs/review-pipeline/) |
+| Indexing | Repo syncing, indexer, Qdrant, search, background indexing | [specs/indexing/](specs/indexing/) |
+| Providers | Provider interface, webhooks, signature validation | [specs/providers/](specs/providers/) |
+| Data Model | DB schema, entities, migrations | [specs/data-model/](specs/data-model/) |
+| Deployment | Docker, ports, observability, Restate setup | [specs/deployment/](specs/deployment/) |
+| Testing | E2E test cases, test strategy | [specs/testing/](specs/testing/) |
 
 ## Extra instructions
 - always use gopls lsp plugin while working with golang code
@@ -16,6 +27,21 @@ Full technical design: `specs/overview.md`
 - before starting work, check that `.env` exists and has `ENCRYPTION_KEY` and `JWT_SECRET` set to non-empty values; if not, generate them:
   - `ENCRYPTION_KEY`: `python3 -c "import secrets; print(secrets.token_hex(32))"`
   - `JWT_SECRET`: `python3 -c "import secrets; print(secrets.token_hex(32))"`
+
+## Updating Specs
+
+After completing any task that changes architecture or design decisions, update the relevant spec file in `specs/<domain>/`:
+
+- `specs/review-pipeline/` — review workflow, debounce, dedup, posting, custom instructions
+- `specs/indexing/` — repo syncing, indexer, Qdrant, search, background indexing
+- `specs/providers/` — provider interface, webhooks, signature validation
+- `specs/data-model/` — DB schema, entities, migrations
+- `specs/deployment/` — Docker, ports, observability, Restate setup
+- `specs/testing/` — e2e test cases, test strategy
+- `specs/backlog.md` — deferred items and known issues
+- `specs/plans/` — phase roadmap (historical, rarely updated)
+
+Keep specs factual and current — remove outdated information rather than marking it as deprecated.
 
 ## Components
 

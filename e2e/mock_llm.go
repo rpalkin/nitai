@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 )
 
@@ -33,6 +34,12 @@ type LLMMock struct {
 
 	// Optional: custom handler for embedding requests. If nil, returns zero vectors.
 	EmbeddingResponseFunc func(reqBody []byte) (statusCode int, response json.RawMessage)
+
+	// Marker-based tracking for parallel test isolation
+	markers              map[string]bool                                // marker string -> registered
+	markerRequests       map[string][]LLMRequest                        // marker -> requests containing this marker
+	markerResponseFuncs  map[string]func([]byte) (int, json.RawMessage) // marker -> response func
+	markerEmbeddingFuncs map[string]func([]byte) (int, json.RawMessage) // marker -> embedding response func
 }
 
 var defaultLLMResponse = json.RawMessage(`{
@@ -59,7 +66,11 @@ var defaultLLMResponse = json.RawMessage(`{
 
 func NewLLMMock() *LLMMock {
 	l := &LLMMock{
-		DefaultResponse: defaultLLMResponse,
+		DefaultResponse:      defaultLLMResponse,
+		markers:              make(map[string]bool),
+		markerRequests:       make(map[string][]LLMRequest),
+		markerResponseFuncs:  make(map[string]func([]byte) (int, json.RawMessage)),
+		markerEmbeddingFuncs: make(map[string]func([]byte) (int, json.RawMessage)),
 	}
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
@@ -88,7 +99,24 @@ func (l *LLMMock) handle(w http.ResponseWriter, r *http.Request) {
 	case "/v1/chat/completions":
 		l.mu.Lock()
 		l.requests = append(l.requests, LLMRequest{Body: bodyBytes})
-		responseFunc := l.ResponseFunc
+
+		// Check for marker matches and tag requests
+		matchedMarker := l.findMatchingMarker(bodyBytes)
+		if matchedMarker != "" {
+			l.markerRequests[matchedMarker] = append(l.markerRequests[matchedMarker], LLMRequest{Body: bodyBytes})
+		}
+
+		// Determine which response function to use
+		var responseFunc func([]byte) (int, json.RawMessage)
+		if matchedMarker != "" {
+			if fn, ok := l.markerResponseFuncs[matchedMarker]; ok {
+				responseFunc = fn
+			}
+		}
+		// Fall back to global ResponseFunc if no marker-specific handler
+		if responseFunc == nil {
+			responseFunc = l.ResponseFunc
+		}
 		defaultResp := l.DefaultResponse
 		l.mu.Unlock()
 
@@ -104,7 +132,19 @@ func (l *LLMMock) handle(w http.ResponseWriter, r *http.Request) {
 	case "/v1/embeddings":
 		l.mu.Lock()
 		l.embeddingRequests = append(l.embeddingRequests, LLMRequest{Body: bodyBytes})
-		embeddingFunc := l.EmbeddingResponseFunc
+
+		// Check for marker matches and determine response function
+		matchedMarker := l.findMatchingMarker(bodyBytes)
+		var embeddingFunc func([]byte) (int, json.RawMessage)
+		if matchedMarker != "" {
+			if fn, ok := l.markerEmbeddingFuncs[matchedMarker]; ok {
+				embeddingFunc = fn
+			}
+		}
+		// Fall back to global EmbeddingResponseFunc if no marker-specific handler
+		if embeddingFunc == nil {
+			embeddingFunc = l.EmbeddingResponseFunc
+		}
 		l.mu.Unlock()
 
 		if embeddingFunc != nil {
@@ -121,6 +161,18 @@ func (l *LLMMock) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 	}
+}
+
+// findMatchingMarker scans the request body for registered markers.
+// Returns the first matching marker, or empty string if none found.
+func (l *LLMMock) findMatchingMarker(body []byte) string {
+	bodyStr := string(body)
+	for marker := range l.markers {
+		if strings.Contains(bodyStr, marker) {
+			return marker
+		}
+	}
+	return ""
 }
 
 // buildDefaultEmbeddingResponse returns a valid embeddings response with zero vectors.
@@ -195,4 +247,57 @@ func (l *LLMMock) Reset() {
 	l.embeddingRequests = nil
 	l.ResponseFunc = nil
 	l.EmbeddingResponseFunc = nil
+	l.markers = make(map[string]bool)
+	l.markerRequests = make(map[string][]LLMRequest)
+	l.markerResponseFuncs = make(map[string]func([]byte) (int, json.RawMessage))
+	l.markerEmbeddingFuncs = make(map[string]func([]byte) (int, json.RawMessage))
+}
+
+// RegisterMarker registers a test marker for request tracking.
+func (l *LLMMock) RegisterMarker(marker string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.markers[marker] = true
+}
+
+// UnregisterMarker removes a test marker.
+func (l *LLMMock) UnregisterMarker(marker string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.markers, marker)
+	delete(l.markerRequests, marker)
+	delete(l.markerResponseFuncs, marker)
+	delete(l.markerEmbeddingFuncs, marker)
+}
+
+// RegisterResponseFuncForMarker sets a custom response handler for requests containing the marker.
+func (l *LLMMock) RegisterResponseFuncForMarker(marker string, fn func(reqBody []byte) (int, json.RawMessage)) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.markers[marker] = true
+	l.markerResponseFuncs[marker] = fn
+}
+
+// RegisterEmbeddingResponseFuncForMarker sets a custom embedding response handler for requests containing the marker.
+func (l *LLMMock) RegisterEmbeddingResponseFuncForMarker(marker string, fn func(reqBody []byte) (int, json.RawMessage)) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.markers[marker] = true
+	l.markerEmbeddingFuncs[marker] = fn
+}
+
+// RequestsForMarker returns LLM requests whose body contains the marker.
+func (l *LLMMock) RequestsForMarker(marker string) []LLMRequest {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]LLMRequest, len(l.markerRequests[marker]))
+	copy(out, l.markerRequests[marker])
+	return out
+}
+
+// RequestCountForMarker returns the count of LLM requests containing the marker.
+func (l *LLMMock) RequestCountForMarker(marker string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.markerRequests[marker])
 }

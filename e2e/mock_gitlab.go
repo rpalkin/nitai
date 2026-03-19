@@ -5,6 +5,7 @@ package e2e
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -13,11 +14,11 @@ import (
 	"strings"
 	"sync"
 
-	gogithttp "github.com/go-git/go-git/v6/backend/http"
 	gogitbilly "github.com/go-git/go-billy/v6/osfs"
+	gogithttp "github.com/go-git/go-git/v6/backend/http"
 	gogitcache "github.com/go-git/go-git/v6/plumbing/cache"
-	gogitstorage "github.com/go-git/go-git/v6/storage"
 	gogittransport "github.com/go-git/go-git/v6/plumbing/transport"
+	gogitstorage "github.com/go-git/go-git/v6/storage"
 	gogitfs "github.com/go-git/go-git/v6/storage/filesystem"
 )
 
@@ -375,4 +376,71 @@ func (g *GitLabMock) Reset() {
 	g.requests = nil
 	g.postedNotes = nil
 	g.postedDiscussions = nil
+}
+
+// NotesFor returns only notes posted to a specific MR.
+func (g *GitLabMock) NotesFor(projectID, mrIID string) []PostedNote {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []PostedNote
+	for _, n := range g.postedNotes {
+		if n.ProjectID == projectID && n.MRNumber == mrIID {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// DiscussionsFor returns only discussions posted to a specific MR.
+func (g *GitLabMock) DiscussionsFor(projectID, mrIID string) []PostedDiscussion {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []PostedDiscussion
+	for _, d := range g.postedDiscussions {
+		if d.ProjectID == projectID && d.MRNumber == mrIID {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// RequestsForMR returns requests whose path contains /projects/{projectID}/merge_requests/{mrIID}.
+func (g *GitLabMock) RequestsForMR(projectID, mrIID string) []RecordedRequest {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []RecordedRequest
+	prefix := fmt.Sprintf("/api/v4/projects/%s/merge_requests/%s", projectID, mrIID)
+	for _, r := range g.requests {
+		if strings.HasPrefix(r.Path, prefix) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ResetForMR removes only the state for a specific MR (notes, discussions, requests, config).
+func (g *GitLabMock) ResetForMR(projectID, mrIID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Remove notes for this MR
+	var newNotes []PostedNote
+	for _, n := range g.postedNotes {
+		if n.ProjectID != projectID || n.MRNumber != mrIID {
+			newNotes = append(newNotes, n)
+		}
+	}
+	g.postedNotes = newNotes
+
+	// Remove discussions for this MR
+	var newDiscussions []PostedDiscussion
+	for _, d := range g.postedDiscussions {
+		if d.ProjectID != projectID || d.MRNumber != mrIID {
+			newDiscussions = append(newDiscussions, d)
+		}
+	}
+	g.postedDiscussions = newDiscussions
+
+	// Remove MR config
+	delete(g.mrConfigs, projectID+"/"+mrIID)
 }

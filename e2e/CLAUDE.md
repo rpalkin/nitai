@@ -15,7 +15,7 @@ docker compose -p e2e down -v
 make e2e
 
 # Equivalent direct command:
-cd e2e && GOWORK=off go test -v -tags e2e -count=1 -timeout 300s ./...
+cd e2e && GOWORK=off go test -v -tags e2e -count=1 -timeout 600s ./...
 
 # Live mode (real GitLab, real LLM):
 E2E_LIVE=1 GITLAB_URL=... GITLAB_TOKEN=... make e2e
@@ -41,10 +41,109 @@ docker compose -p e2e build api-server worker
 
 ## Module setup
 
-- Standalone module: NOT part of `go.work`. Always run with `GOWORK=off`.
+- Standalone module: listed in `go.work` for IDE tooling, but tests are always run with `GOWORK=off`.
 - Uses `replace ai-reviewer/gen => ../gen/go` in `go.mod`.
 - Dependencies: `testcontainers-go` (compose), `connectrpc/connect-go`, `pgx/v5` (direct DB assertions).
 - `gen/go/go.mod` is committed (not gitignored) so `go get` works without running `make proto`. The generated `.go` files are still gitignored — run `make proto` before building.
+
+## Parallel Test Execution
+
+All 29 e2e tests run in parallel using `t.Parallel()`. Test isolation is achieved through:
+
+1. **Unique MR IIDs**: Each test gets a unique MR IID via an atomic counter
+2. **TestContext**: Per-test context encapsulating all isolated state
+3. **Marker-based tracking**: Unique markers embedded in MR titles flow through to LLM requests
+4. **Scoped mock access**: Mock GitLab and LLM provide per-MR/marker filtered access
+
+### TestContext Pattern
+
+Use `TestContext` for all new tests:
+
+```go
+func TestExample(t *testing.T) {
+    t.Parallel()
+    tc := NewTestContext(t)
+    
+    // Configure MR with marker automatically injected into title
+    tc.SetMR(&MRConfig{
+        Details: json.RawMessage(`{
+            "title": "My PR",  // Marker will be appended: "My PR e2e-marker-<IID>"
+            "sha": "abc123"
+        }`),
+        Changes: json.RawMessage(`{"changes": [...]}`),
+    })
+    
+    // Send webhook (project ID and MR IID set automatically)
+    resp := tc.SendWebhook(map[string]any{
+        "object_kind": "merge_request",
+        "object_attributes": map[string]any{
+            "action": "open", "draft": false,
+        },
+    })
+    
+    // Wait for completion
+    tc.WaitForReviewRun("completed", 90*time.Second)
+    
+    // Assert using scoped accessors
+    if tc.LLMRequestCount() != 1 {
+        t.Errorf("expected 1 LLM call, got %d", tc.LLMRequestCount())
+    }
+    notes := tc.Notes()  // Only notes for this test's MR
+    discussions := tc.Discussions()  // Only discussions for this test's MR
+}
+```
+
+### TestContext Methods
+
+| Method | Description |
+|--------|-------------|
+| `tc.SetMR(cfg)` | Configure mock GitLab for this test's MR (marker auto-injected) |
+| `tc.SendWebhook(payload)` | Send webhook with auto-set project/MR IDs |
+| `tc.TriggerReview()` | Trigger review via API for this test's repo/MR |
+| `tc.WaitForReviewRun(status, timeout)` | Poll DB for review run status |
+| `tc.PollReviewRun(runID, status, timeout, interval)` | Poll API for review run status |
+| `tc.QueryReviewRuns()` | Get all review runs for this test's MR |
+| `tc.Notes()` | Get notes posted to this test's MR only |
+| `tc.Discussions()` | Get discussions posted to this test's MR only |
+| `tc.LLMRequestCount()` | Count LLM requests containing this test's marker |
+| `tc.LLMRequests()` | Get LLM requests containing this test's marker |
+| `tc.SetResponseFunc(fn)` | Set custom LLM response for this test |
+| `tc.SetEmbeddingResponseFunc(fn)` | Set custom embedding response for this test |
+
+### TestContext Fields
+
+| Field | Description |
+|-------|-------------|
+| `tc.MRIID` | Unique MR IID for this test |
+| `tc.Marker` | Unique marker string (e.g., `e2e-marker-42`) |
+| `tc.ProviderID` | Created provider ID |
+| `tc.RepoID` | Created repo ID |
+| `tc.WebhookSecret` | Webhook secret for provider |
+| `tc.ProjectID` | Project ID (typically "100") |
+
+### Migration from Global State
+
+Old pattern (sequential, shared state):
+```go
+func TestOld(t *testing.T) {
+    gitlab.SetMR("100", "1", cfg)  // Shared MR IID
+    gitlab.Reset()                  // Clears all state
+    notes := gitlab.Notes()         // All notes from all tests
+    llm.RequestCount()              // All requests from all tests
+}
+```
+
+New pattern (parallel, isolated state):
+```go
+func TestNew(t *testing.T) {
+    t.Parallel()
+    tc := NewTestContext(t)         // Unique MR IID + marker
+    tc.SetMR(cfg)                   // Scoped to this test
+    // No need to call Reset()
+    notes := tc.Notes()             // Only this test's notes
+    tc.LLMRequestCount()            // Only this test's requests
+}
+```
 
 ## Mock mode vs live mode
 
@@ -123,4 +222,4 @@ Each test case should:
 | `TestMalformedWebhookBody` | Invalid JSON body → 4xx or 200, no review run (spec M). |
 | `TestManyInlineComments` | 50 inline comments all posted to GitLab (spec N). |
 
-**Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the debounce (configured via `DEBOUNCE_TIMEOUT=5s` in e2e). They complete in seconds instead of minutes. The suite timeout is 300s.
+**Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the debounce (configured via `DEBOUNCE_TIMEOUT=5s` in e2e). They complete in seconds instead of minutes. With parallel execution, the full suite completes in ~5-8 minutes (previously ~30-50 minutes). The suite timeout is 600s.

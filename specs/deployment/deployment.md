@@ -55,6 +55,7 @@ Admin API ~-> API Server (:8090 host, ConnectRPC)
 - **Restate** — durable workflow orchestration. Virtual Object `PRReview` ensures one review per MR at a time.
 - **Qdrant** — vector database on ports `6333` (REST) and `6334` (gRPC), with data persisted in `./db`. One collection per repo+branch, named `<repo_id>_<branch>` via `sanitize_collection_name`.
 - **Repos volume** — Docker volume mounted at `/data/repos` in worker, reviewer, and indexer containers. Stores bare git clones managed by `RepoSyncer`. One bare clone per repo at `/data/repos/<repo_id>/`.
+- **FastEmbed cache** — Bind mount at `./data/fastembed-cache:/data/fastembed-cache` shared by indexer and search-mcp containers. Caches ONNX models downloaded by fastembed (used for sparse vectors in hybrid search). The `FASTEMBED_CACHE_PATH` env var points fastembed to this location. Uses a bind mount instead of a named volume so the cache survives `docker compose down -v`.
 
 ## Restate
 

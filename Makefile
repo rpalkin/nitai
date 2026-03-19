@@ -1,4 +1,22 @@
-.PHONY: proto vendor up down logs smoke e2e unit
+.PHONY: init proto vendor up down logs smoke e2e unit
+
+init:
+	@if [ ! -f .env ]; then \
+		echo "Creating .env from .env.example..."; \
+		cp .env.example .env; \
+		ENCRYPTION_KEY=$$(python3 -c "import secrets; print(secrets.token_hex(32))"); \
+		JWT_SECRET=$$(python3 -c "import secrets; print(secrets.token_hex(32))"); \
+		if [ "$$(uname)" = "Darwin" ]; then \
+			sed -i '' "s/^ENCRYPTION_KEY=$$/ENCRYPTION_KEY=$$ENCRYPTION_KEY/" .env; \
+			sed -i '' "s/^JWT_SECRET=$$/JWT_SECRET=$$JWT_SECRET/" .env; \
+		else \
+			sed -i "s/^ENCRYPTION_KEY=$$/ENCRYPTION_KEY=$$ENCRYPTION_KEY/" .env; \
+			sed -i "s/^JWT_SECRET=$$/JWT_SECRET=$$JWT_SECRET/" .env; \
+		fi; \
+		echo ".env created with generated ENCRYPTION_KEY and JWT_SECRET"; \
+	else \
+		echo ".env already exists"; \
+	fi
 
 proto:
 	buf lint
@@ -20,7 +38,7 @@ down:
 logs:
 	docker compose logs -f
 
-smoke:
+smoke: init vendor
 	@echo "=== Cleaning up stale volumes before smoke test ==="
 	docker compose down -v --remove-orphans 2>/dev/null || true
 	@PROJECT_NAME=$$(basename "$$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g'); \
@@ -28,7 +46,7 @@ smoke:
 	@echo "=== Running smoke tests ==="
 	./tests/smoke.sh
 
-e2e: vendor
+e2e: init vendor
 	@echo "=== Cleaning all test data for fresh e2e run ==="
 	@echo "Removing Docker volumes..."
 	docker volume rm e2e_restate-e2e-data 2>/dev/null || true
@@ -48,9 +66,9 @@ e2e: vendor
 		cd e2e && \
 		DOCKER_HOST=$${DOCKER_HOST:-$$(docker context inspect --format '{{.Endpoints.docker.Host}}')} \
 		TESTCONTAINERS_RYUK_DISABLED=true \
-		GOWORK=off go test -v -tags e2e -count=1 -timeout 900s $$RUN_FLAGS ./... 2>&1 | tee $$E2E_LOG; \
+		GOWORK=off go test -v -tags e2e -count=1 -timeout 600s -parallel 4 $$RUN_FLAGS ./... 2>&1 | tee $$E2E_LOG; \
 		exit $${PIPESTATUS[0]}
 
-unit:
+unit: init vendor
 	cd go-services && go test ./...
 	cd api-server && go test ./...

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	tc "github.com/testcontainers/testcontainers-go/modules/compose"
 )
+
+// mrIIDCounter assigns unique MR IIDs to each test for isolation.
+var mrIIDCounter atomic.Int64
+
+// nextMRIID returns the next unique MR IID for test isolation.
+func nextMRIID() string {
+	return fmt.Sprintf("%d", mrIIDCounter.Add(1))
+}
 
 const e2eDBURL = "postgres://ai_reviewer:ai_reviewer@localhost:5432/ai_reviewer?sslmode=disable"
 
@@ -480,4 +489,163 @@ func generateHexKey(nBytes int) string {
 	b := make([]byte, nBytes)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// TestContext encapsulates per-test isolated state for parallel test execution.
+type TestContext struct {
+	T             *testing.T
+	MRIID         string // unique MR IID from atomic counter
+	Marker        string // "e2e-marker-<MRIID>" embedded in MR titles
+	ProviderID    string
+	RepoID        string
+	WebhookSecret string
+	ProjectID     string // typically "100"
+}
+
+// NewTestContext allocates a unique MR IID, creates provider+repo, and registers the marker.
+// The marker is embedded in the MR title so it flows through to the LLM request body.
+func NewTestContext(t *testing.T) *TestContext {
+	t.Helper()
+
+	// Allocate unique MR IID and marker
+	mrIID := nextMRIID()
+	marker := fmt.Sprintf("e2e-marker-%s", mrIID)
+
+	// Create provider and repo
+	providerID, repoID, webhookSecret := SetupProviderAndRepo(t, clients, gitlab)
+
+	tc := &TestContext{
+		T:             t,
+		MRIID:         mrIID,
+		Marker:        marker,
+		ProviderID:    providerID,
+		RepoID:        repoID,
+		WebhookSecret: webhookSecret,
+		ProjectID:     "100",
+	}
+
+	// Register marker with LLM mock for request tracking
+	llm.RegisterMarker(marker)
+
+	// Cleanup function to unregister marker and reset MR-specific state
+	t.Cleanup(func() {
+		llm.UnregisterMarker(marker)
+		gitlab.ResetForMR(tc.ProjectID, tc.MRIID)
+	})
+
+	return tc
+}
+
+// SetMR configures the mock GitLab for this test's MR with the marker embedded in the title.
+// The marker is added to the MR title so it flows through to LLM requests.
+func (tc *TestContext) SetMR(cfg *MRConfig) {
+	tc.T.Helper()
+
+	// Inject marker into the MR title in the Details JSON
+	if cfg.Details != nil {
+		var details map[string]any
+		if err := json.Unmarshal(cfg.Details, &details); err == nil {
+			if title, ok := details["title"].(string); ok {
+				details["title"] = fmt.Sprintf("%s %s", title, tc.Marker)
+			} else {
+				details["title"] = tc.Marker
+			}
+			if updated, err := json.Marshal(details); err == nil {
+				cfg.Details = updated
+			}
+		}
+	}
+
+	gitlab.SetMR(tc.ProjectID, tc.MRIID, cfg)
+}
+
+// Notes returns only notes posted to this test's MR.
+func (tc *TestContext) Notes() []PostedNote {
+	return gitlab.NotesFor(tc.ProjectID, tc.MRIID)
+}
+
+// Discussions returns only discussions posted to this test's MR.
+func (tc *TestContext) Discussions() []PostedDiscussion {
+	return gitlab.DiscussionsFor(tc.ProjectID, tc.MRIID)
+}
+
+// LLMRequestCount returns the count of LLM requests containing this test's marker.
+func (tc *TestContext) LLMRequestCount() int {
+	return llm.RequestCountForMarker(tc.Marker)
+}
+
+// LLMRequests returns LLM requests whose body contains this test's marker.
+func (tc *TestContext) LLMRequests() []LLMRequest {
+	return llm.RequestsForMarker(tc.Marker)
+}
+
+// SetResponseFunc sets a custom LLM response for this test's requests.
+func (tc *TestContext) SetResponseFunc(fn func(reqBody []byte) (int, json.RawMessage)) {
+	llm.RegisterResponseFuncForMarker(tc.Marker, fn)
+}
+
+// SetEmbeddingResponseFunc sets a custom embedding response for this test's requests.
+func (tc *TestContext) SetEmbeddingResponseFunc(fn func(reqBody []byte) (int, json.RawMessage)) {
+	llm.RegisterEmbeddingResponseFuncForMarker(tc.Marker, fn)
+}
+
+// SendWebhook sends a webhook for this test's provider/MR.
+func (tc *TestContext) SendWebhook(payload map[string]any) *http.Response {
+	tc.T.Helper()
+
+	// Parse MR IID and project ID as integers (webhook handler expects int64)
+	mrNum, _ := parseInt64(tc.MRIID)
+	projNum, _ := parseInt64(tc.ProjectID)
+
+	// Set project ID and MR IID in the payload
+	if objAttrs, ok := payload["object_attributes"].(map[string]any); ok {
+		objAttrs["iid"] = mrNum
+	}
+	// Ensure project field exists and set the project ID
+	if project, ok := payload["project"].(map[string]any); ok {
+		project["id"] = projNum
+	} else {
+		payload["project"] = map[string]any{"id": projNum}
+	}
+
+	return SendWebhook(tc.T, clients.BaseURL, tc.ProviderID, tc.WebhookSecret, payload)
+}
+
+// TriggerReview triggers a review for this test's repo/MR.
+func (tc *TestContext) TriggerReview() (string, error) {
+	mrNum, _ := parseInt64(tc.MRIID)
+
+	triggerResp, err := clients.Review.TriggerReview(context.Background(),
+		connect.NewRequest(&apiv1.TriggerReviewRequest{
+			RepoId:   tc.RepoID,
+			MrNumber: mrNum,
+		}))
+	if err != nil {
+		return "", err
+	}
+	return triggerResp.Msg.ReviewRun.Id, nil
+}
+
+// WaitForReviewRun waits for a review run with the given status for this test's MR.
+func (tc *TestContext) WaitForReviewRun(status string, timeout time.Duration) *DBReviewRun {
+	mrNum, _ := parseInt64(tc.MRIID)
+	return WaitForReviewRun(tc.T, tc.RepoID, mrNum, status, timeout)
+}
+
+// QueryReviewRuns returns all review runs for this test's MR.
+func (tc *TestContext) QueryReviewRuns() []DBReviewRun {
+	mrNum, _ := parseInt64(tc.MRIID)
+	return QueryReviewRuns(tc.T, tc.RepoID, mrNum)
+}
+
+// PollReviewRun polls for a review run with the given status for this test's MR.
+func (tc *TestContext) PollReviewRun(runID string, wantStatus apiv1.ReviewStatus, timeout, interval time.Duration) *apiv1.ReviewRun {
+	return PollReviewRun(tc.T, clients.Review, runID, wantStatus, timeout, interval)
+}
+
+// parseInt64 parses a string to int64.
+func parseInt64(s string) (int64, error) {
+	var result int64
+	_, err := fmt.Sscanf(s, "%d", &result)
+	return result, err
 }

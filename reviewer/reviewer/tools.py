@@ -10,7 +10,7 @@ from fastmcp import Client
 
 logger = logging.getLogger("reviewer.tools")
 
-SEARCH_TIMEOUT = 10  # seconds
+SEARCH_TIMEOUT = int(os.environ.get("SEARCH_TIMEOUT", "10"))  # seconds
 MAX_SEARCH_RESPONSE_SIZE = 100 * 1024  # 100KB
 
 

@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package api.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "ai-reviewer/gen/api/v1;apiv1";
+
+message ReviewInstruction {
+  string id = 1;
+  string org_id = 2;
+  string name = 3;
+  string content = 4;
+  repeated string repo_filter = 5;
+  repeated string file_pattern_filter = 6;
+  bool enabled = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message CreateInstructionRequest {
+  string name = 1;
+  string content = 2;
+  repeated string repo_filter = 3;
+  repeated string file_pattern_filter = 4;
+}
+
+message CreateInstructionResponse {
+  ReviewInstruction instruction = 1;
+}
+
+message ListInstructionsRequest {}
+
+message ListInstructionsResponse {
+  repeated ReviewInstruction instructions = 1;
+}
+
+message UpdateInstructionRequest {
+  string id = 1;
+  string name = 2;
+  string content = 3;
+  repeated string repo_filter = 4;
+  repeated string file_pattern_filter = 5;
+  bool enabled = 6;
+}
+
+message UpdateInstructionResponse {
+  ReviewInstruction instruction = 1;
+}
+
+message DeleteInstructionRequest {
+  string id = 1;
+}
+
+message DeleteInstructionResponse {}
+
+message ResolveInstructionsRequest {
+  string repo_id = 1;
+  repeated string changed_files = 2;
+}
+
+message ResolveInstructionsResponse {
+  repeated ReviewInstruction instructions = 1;
+}
+
+service InstructionService {
+  rpc CreateInstruction(CreateInstructionRequest) returns (CreateInstructionResponse);
+  rpc ListInstructions(ListInstructionsRequest) returns (ListInstructionsResponse);
+  rpc UpdateInstruction(UpdateInstructionRequest) returns (UpdateInstructionResponse);
+  rpc DeleteInstruction(DeleteInstructionRequest) returns (DeleteInstructionResponse);
+  rpc ResolveInstructions(ResolveInstructionsRequest) returns (ResolveInstructionsResponse);
+}

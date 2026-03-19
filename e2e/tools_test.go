@@ -312,15 +312,27 @@ func TestSemanticSearch(t *testing.T) {
 	if !strings.Contains(discussions[0].Body, "mathutil.Foo requires 2 arguments") {
 		t.Errorf("discussion body missing expected content: %s", discussions[0].Body)
 	}
-	// The second LLM request should contain the search tool result
+	// The second LLM request should contain the search tool result with actual indexed content
 	llmReqs := tc.LLMRequests()
 	if len(llmReqs) < 2 {
 		t.Fatalf("expected at least 2 LLM requests (search + final), got %d", len(llmReqs))
 	}
-	// Verify the search_codebase tool result was passed back to the LLM
 	body := string(llmReqs[1].Body)
+
+	// Verify the search_codebase tool result was passed back to the LLM
 	if !strings.Contains(body, "search_codebase") && !strings.Contains(body, "tool") {
 		t.Errorf("second LLM request missing search_codebase tool result: %s", body)
+	}
+
+	// Verify actual search results contain content from the indexed repo.
+	// The test repo has pkg/mathutil/mathutil.go with "func Foo(x, y int) int".
+	// search-mcp should have returned this via Qdrant after indexing.
+	if !strings.Contains(body, "Foo") {
+		t.Errorf("search results should contain 'Foo' from indexed mathutil.go, got: %s", body)
+	}
+	// The search results should NOT be an error — they should contain actual code
+	if strings.Contains(body, "search context not available") || strings.Contains(body, "search-mcp failed") {
+		t.Errorf("search_codebase returned an error instead of real results: %s", body)
 	}
 }
 
@@ -527,6 +539,103 @@ func TestIndexerFailureGracefulDegradation(t *testing.T) {
 	// Comments still posted despite indexing failure
 	if len(run.Comments) == 0 {
 		t.Errorf("expected comments in completed review despite indexing failure")
+	}
+}
+
+// TestSearchCodebaseReturnsIndexedContent verifies that search_codebase returns actual
+// content from the indexed repository via search-mcp + Qdrant, not just an error string.
+// Searches for "CalculateTotal" which is defined in src/util.go of the test repo.
+// NOTE: Sequential (no t.Parallel) to avoid search-mcp concurrency issues with streamable-http.
+func TestSearchCodebaseReturnsIndexedContent(t *testing.T) {
+	tc := NewTestContext(t)
+
+	tc.SetMR(&MRConfig{
+		Details: json.RawMessage(`{
+            "title": "Refactor order processing",
+            "description": "Cleanup handler",
+            "author": {"username": "alice"},
+            "source_branch": "feature/orders",
+            "target_branch": "main",
+            "sha": "srch111",
+            "draft": false
+        }`),
+		Changes: json.RawMessage(`{
+            "changes": [{
+                "old_path": "src/handler.go",
+                "new_path": "src/handler.go",
+                "diff": "@@ -5,6 +5,7 @@ package handler\n import \"fmt\"\n \n func ProcessOrder(order *Order) error {\n+    // TODO: validate items\n     result := CalculateTotal(order.Items)\n     return nil\n }",
+                "new_file": false, "deleted_file": false, "renamed_file": false
+            }]
+        }`),
+		Versions: json.RawMessage(`[{
+            "id": 1, "head_commit_sha": "srch111",
+            "base_commit_sha": "base000", "start_commit_sha": "base000"
+        }]`),
+	})
+
+	// Two-turn: first call searches for CalculateTotal, second produces final result.
+	var callCount atomic.Int32
+	tc.SetResponseFunc(func(reqBody []byte) (int, json.RawMessage) {
+		n := callCount.Add(1)
+		if n == 1 {
+			return 200, json.RawMessage(`{
+                "id": "chatcmpl-srch-1",
+                "object": "chat.completion",
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_srch1",
+                            "type": "function",
+                            "function": {
+                                "name": "search_codebase",
+                                "arguments": "{\"query\": \"CalculateTotal function implementation\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+            }`)
+		}
+		return 200, defaultLLMResponse
+	})
+
+	runID, err := tc.TriggerReview()
+	if err != nil {
+		t.Fatalf("TriggerReview: %v", err)
+	}
+
+	run := tc.PollReviewRun(runID,
+		apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED, 90*time.Second, 2*time.Second)
+	if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED {
+		t.Errorf("expected COMPLETED, got %s", run.Status)
+	}
+	if callCount.Load() != 2 {
+		t.Errorf("expected 2 LLM calls (search + final), got %d", callCount.Load())
+	}
+
+	reqs := tc.LLMRequests()
+	if len(reqs) < 2 {
+		t.Fatalf("expected at least 2 LLM requests, got %d", len(reqs))
+	}
+	body := string(reqs[1].Body)
+
+	// The search result must contain actual indexed content, not an error
+	if strings.Contains(body, "search context not available") {
+		t.Errorf("search_codebase returned 'search context not available' — indexing did not produce a collection")
+	}
+	if strings.Contains(body, "search-mcp failed") || strings.Contains(body, "search-mcp timed out") {
+		t.Errorf("search_codebase returned search-mcp error — search-mcp is not running: %s", body)
+	}
+
+	// Verify the search results contain actual code from the indexed repo.
+	// src/util.go defines CalculateTotal which should be in the Qdrant index.
+	if !strings.Contains(body, "CalculateTotal") {
+		t.Errorf("search results should contain 'CalculateTotal' from indexed src/util.go: %s", body)
 	}
 }
 

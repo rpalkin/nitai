@@ -192,7 +192,12 @@ func (l *LLMMock) buildDefaultEmbeddingResponse(bodyBytes []byte) []byte {
 	}
 
 	const dim = 1536
+	// Use non-zero vectors so Qdrant cosine similarity is well-defined.
+	// Zero vectors cause division-by-zero in cosine distance.
 	zeroVec := make([]float64, dim)
+	for i := range zeroVec {
+		zeroVec[i] = 0.1
+	}
 
 	type embeddingItem struct {
 		Object    string    `json:"object"`

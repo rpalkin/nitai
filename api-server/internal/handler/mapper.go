@@ -3,8 +3,8 @@ package handler
 import (
 	"time"
 
-	apiv1 "ai-reviewer/gen/api/v1"
 	"ai-reviewer/api-server/internal/db"
+	apiv1 "ai-reviewer/gen/api/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -95,5 +95,19 @@ func reviewRunToProto(run db.ReviewRunRow, comments []db.ReviewCommentRow) *apiv
 		Comments:  protoComments,
 		CreatedAt: toTimestamp(run.CreatedAt),
 		UpdatedAt: toTimestamp(run.UpdatedAt),
+	}
+}
+
+func instructionRowToProto(r db.InstructionRow) *apiv1.ReviewInstruction {
+	return &apiv1.ReviewInstruction{
+		Id:                r.ID,
+		OrgId:             r.OrgID,
+		Name:              r.Name,
+		Content:           r.Content,
+		RepoFilter:        r.RepoFilter,
+		FilePatternFilter: r.FilePatternFilter,
+		Enabled:           r.Enabled,
+		CreatedAt:         toTimestamp(r.CreatedAt),
+		UpdatedAt:         toTimestamp(r.UpdatedAt),
 	}
 }

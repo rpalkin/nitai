@@ -11,7 +11,7 @@ Core entities and database schema for ai-reviewer.
 | Provider | id, org_id, type (github/gitlab/gitlab_self_hosted), api_url, token (encrypted), webhook_secret |
 | Repository | id, org_id, provider_id, remote_id, name, full_name, default_branch, review_enabled |
 | BranchIndex | id, repo_id, branch, last_indexed_commit, collection_name, updated_at |
-| ReviewInstruction | id, org_id, content, filters (repos, file patterns, languages) |
+| ReviewInstruction | id, org_id, name, content, repo_filter (UUID[]), file_pattern_filter (TEXT[]), enabled |
 | PRReview | id, repo_id, pr_number, diff_hash, status (pending/completed/failed/skipped/draft), summary, created_at, is_dry_run |
 | ReviewComment | id, review_id, file_path, line, body, provider_comment_id, posted (bool) |
 | ReviewFeedback | id, comment_id, user_identifier, rating (positive/negative), created_at |

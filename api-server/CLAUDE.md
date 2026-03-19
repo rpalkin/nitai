@@ -50,6 +50,7 @@ make proto
   - `provider.go` — `CreateProvider` (validates GitLab, encrypts token, syncs repos in a single transaction), `ListProviders`, `DeleteProvider` (soft-delete)
   - `repo.go` — `ListRepos`, `EnableReview`, `DisableReview`
   - `review.go` — `TriggerReview` (creates review_run row, fires PRReview via Restate `/send`), `GetReviewRun`
+  - `instruction.go` — `InstructionService` CRUD + `ResolveInstructions` (filters by repo_filter, file_pattern_filter using `filepath.Match`)
   - `webhook.go` — `POST /webhooks/{provider_id}` handler for GitLab MR events. Validates `X-Gitlab-Token`, filters non-MR/non-reviewable actions, handles draft→ready transitions, cancels existing invocations (debounce), dispatches via Restate. Uses `WebhookStore` and `RestateDispatcher` interfaces for testability.
   - `mapper.go` — DB row to protobuf response mapping
 - **`restate/`** — HTTP client for Restate ingress and admin API. `SendPRReview` posts fire-and-forget to `/PRReview/{key}/Run/send` (202). `CancelInvocation` patches `/invocations/{id}/cancel` via admin API (404 silently ignored).
@@ -71,13 +72,16 @@ SQL files in `migrations/` managed by golang-migrate, embedded in the binary:
 - `000008_branch_indexes` — creates `branch_indexes` table (repo_id, branch, last_indexed_commit, collection_name, updated_at) with unique constraint on (repo_id, branch)
 - `000009_default_branch` — adds `default_branch TEXT NOT NULL DEFAULT 'main'` to repositories
 - `000010_users` — creates `users` table (id, org_id, email, password_hash) with unique email constraint
+- `000011_review_instructions` — creates `review_instructions` table (id, org_id, name, content, repo_filter UUID[], file_pattern_filter TEXT[], enabled, timestamps)
 
 ### HTTP Endpoints
 
-- ConnectRPC services: `AuthService`, `ProviderService`, `RepoService`, `ReviewService` (generated paths from protobuf)
+- ConnectRPC services: `AuthService`, `ProviderService`, `RepoService`, `ReviewService`, `InstructionService` (generated paths from protobuf)
   - `AuthService/Register` — Create new user account (unauthenticated)
   - `AuthService/Login` — Authenticate and get JWT (unauthenticated)
   - `AuthService/GetMe` — Get current authenticated user
+  - `InstructionService/CreateInstruction`, `ListInstructions`, `UpdateInstruction`, `DeleteInstruction` — CRUD for org-scoped review instructions
+  - `InstructionService/ResolveInstructions` — Returns applicable instructions given repo_id + changed_files
 - `POST /webhooks/{provider_id}` — GitLab webhook receiver (unauthenticated)
 - `GET /healthz` — health check (unauthenticated)
 
@@ -99,4 +103,4 @@ SQL files in `migrations/` managed by golang-migrate, embedded in the binary:
 
 ### Protobuf
 
-API definitions in `proto/api/v1/` (auth.proto, provider.proto, repo.proto, review.proto). Generated Go code in `gen/go/`, imported as `ai-reviewer/gen`. Code generation: `make proto` (uses buf).
+API definitions in `proto/api/v1/` (auth.proto, provider.proto, repo.proto, review.proto, instruction.proto). Generated Go code in `gen/go/`, imported as `ai-reviewer/gen`. Code generation: `make proto` (uses buf).

@@ -113,22 +113,24 @@ func (t *testMainT) Logf(format string, args ...any) {
 }
 
 type TestClients struct {
-	Provider apiv1connect.ProviderServiceClient
-	Repo     apiv1connect.RepoServiceClient
-	Review   apiv1connect.ReviewServiceClient
-	Auth     apiv1connect.AuthServiceClient
-	BaseURL  string
-	Token    string // JWT token for authenticated requests
+	Provider    apiv1connect.ProviderServiceClient
+	Repo        apiv1connect.RepoServiceClient
+	Review      apiv1connect.ReviewServiceClient
+	Auth        apiv1connect.AuthServiceClient
+	Instruction apiv1connect.InstructionServiceClient
+	BaseURL     string
+	Token       string // JWT token for authenticated requests
 }
 
 func NewTestClients(baseURL string) *TestClients {
 	httpClient := &http.Client{}
 	return &TestClients{
-		Provider: apiv1connect.NewProviderServiceClient(httpClient, baseURL),
-		Repo:     apiv1connect.NewRepoServiceClient(httpClient, baseURL),
-		Review:   apiv1connect.NewReviewServiceClient(httpClient, baseURL),
-		Auth:     apiv1connect.NewAuthServiceClient(httpClient, baseURL),
-		BaseURL:  baseURL,
+		Provider:    apiv1connect.NewProviderServiceClient(httpClient, baseURL),
+		Repo:        apiv1connect.NewRepoServiceClient(httpClient, baseURL),
+		Review:      apiv1connect.NewReviewServiceClient(httpClient, baseURL),
+		Auth:        apiv1connect.NewAuthServiceClient(httpClient, baseURL),
+		Instruction: apiv1connect.NewInstructionServiceClient(httpClient, baseURL),
+		BaseURL:     baseURL,
 	}
 }
 
@@ -141,12 +143,13 @@ func NewAuthenticatedTestClients(baseURL, token string) *TestClients {
 		},
 	}
 	return &TestClients{
-		Provider: apiv1connect.NewProviderServiceClient(httpClient, baseURL),
-		Repo:     apiv1connect.NewRepoServiceClient(httpClient, baseURL),
-		Review:   apiv1connect.NewReviewServiceClient(httpClient, baseURL),
-		Auth:     apiv1connect.NewAuthServiceClient(httpClient, baseURL),
-		BaseURL:  baseURL,
-		Token:    token,
+		Provider:    apiv1connect.NewProviderServiceClient(httpClient, baseURL),
+		Repo:        apiv1connect.NewRepoServiceClient(httpClient, baseURL),
+		Review:      apiv1connect.NewReviewServiceClient(httpClient, baseURL),
+		Auth:        apiv1connect.NewAuthServiceClient(httpClient, baseURL),
+		Instruction: apiv1connect.NewInstructionServiceClient(httpClient, baseURL),
+		BaseURL:     baseURL,
+		Token:       token,
 	}
 }
 
@@ -307,6 +310,22 @@ func waitForHTTP(t testingT, url string, timeout time.Duration) {
 	t.Fatalf("timed out waiting for %s to return 200", url)
 }
 
+// waitForTCPReady polls a TCP address until a connection succeeds or the timeout expires.
+// Useful for services like search-mcp that don't have an HTTP health endpoint.
+func waitForTCPReady(t testingT, addr string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err == nil {
+			conn.Close()
+			t.Logf("ready: %s", addr)
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	t.Fatalf("timed out waiting for %s to accept TCP connections", addr)
+}
+
 // waitForRestateServices polls the Restate admin API until all required services
 // are registered, or the timeout expires.
 func waitForRestateServices(t testingT, adminURL string, timeout time.Duration) {
@@ -423,9 +442,10 @@ func StartStack(t testingT, gitlabMock *GitLabMock, llmMock *LLMMock) *E2EStack 
 		t.Fatalf("starting compose stack: %v", err)
 	}
 
-	// Poll for api-server and Restate readiness, then wait for service registration.
+	// Poll for api-server, Restate, and search-mcp readiness, then wait for service registration.
 	waitForHTTP(t, "http://localhost:8090/healthz", 60*time.Second)
 	waitForHTTP(t, "http://localhost:9070/health", 60*time.Second)
+	waitForTCPReady(t, "localhost:8081", 60*time.Second)
 	waitForRestateServices(t, "http://localhost:9070", 120*time.Second)
 
 	// Register a test user and create authenticated clients

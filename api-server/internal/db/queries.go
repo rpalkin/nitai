@@ -430,6 +430,19 @@ type UserRow struct {
 	UpdatedAt    time.Time
 }
 
+// InstructionRow holds review instruction data from the review_instructions table.
+type InstructionRow struct {
+	ID                string
+	OrgID             string
+	Name              string
+	Content           string
+	RepoFilter        []string
+	FilePatternFilter []string
+	Enabled           bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 // InsertUser inserts a new user and returns the row.
 func InsertUser(ctx context.Context, pool *pgxpool.Pool, orgID, email, passwordHash string) (*UserRow, error) {
 	const q = `
@@ -485,4 +498,137 @@ func GetUserByID(ctx context.Context, pool *pgxpool.Pool, id string) (*UserRow, 
 		return nil, fmt.Errorf("GetUserByID: %w", err)
 	}
 	return row, nil
+}
+
+// InsertInstruction inserts a new review instruction and returns the row.
+func InsertInstruction(ctx context.Context, pool *pgxpool.Pool, orgID, name, content string, repoFilter, filePatternFilter []string) (*InstructionRow, error) {
+	if repoFilter == nil {
+		repoFilter = []string{}
+	}
+	if filePatternFilter == nil {
+		filePatternFilter = []string{}
+	}
+	const q = `
+		INSERT INTO review_instructions (org_id, name, content, repo_filter, file_pattern_filter)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, org_id, name, content, repo_filter, file_pattern_filter, enabled, created_at, updated_at`
+
+	row := &InstructionRow{}
+	err := pool.QueryRow(ctx, q, orgID, name, content, repoFilter, filePatternFilter).Scan(
+		&row.ID, &row.OrgID, &row.Name, &row.Content, &row.RepoFilter, &row.FilePatternFilter, &row.Enabled, &row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("InsertInstruction: %w", err)
+	}
+	return row, nil
+}
+
+// ListInstructionsByOrg returns all review instructions for an org.
+func ListInstructionsByOrg(ctx context.Context, pool *pgxpool.Pool, orgID string) ([]InstructionRow, error) {
+	const q = `
+		SELECT id, org_id, name, content, repo_filter, file_pattern_filter, enabled, created_at, updated_at
+		FROM review_instructions
+		WHERE org_id = $1
+		ORDER BY created_at`
+
+	rows, err := pool.Query(ctx, q, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("ListInstructionsByOrg: %w", err)
+	}
+	defer rows.Close()
+
+	var instructions []InstructionRow
+	for rows.Next() {
+		var i InstructionRow
+		if err := rows.Scan(&i.ID, &i.OrgID, &i.Name, &i.Content, &i.RepoFilter, &i.FilePatternFilter, &i.Enabled, &i.CreatedAt, &i.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ListInstructionsByOrg scan: %w", err)
+		}
+		instructions = append(instructions, i)
+	}
+	return instructions, rows.Err()
+}
+
+// GetInstruction fetches a review instruction by ID.
+func GetInstruction(ctx context.Context, pool *pgxpool.Pool, id string) (*InstructionRow, error) {
+	const q = `
+		SELECT id, org_id, name, content, repo_filter, file_pattern_filter, enabled, created_at, updated_at
+		FROM review_instructions
+		WHERE id = $1`
+
+	row := &InstructionRow{}
+	err := pool.QueryRow(ctx, q, id).Scan(
+		&row.ID, &row.OrgID, &row.Name, &row.Content, &row.RepoFilter, &row.FilePatternFilter, &row.Enabled, &row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, pgx.ErrNoRows
+		}
+		return nil, fmt.Errorf("GetInstruction: %w", err)
+	}
+	return row, nil
+}
+
+// UpdateInstruction updates a review instruction and returns the updated row.
+func UpdateInstruction(ctx context.Context, pool *pgxpool.Pool, id, name, content string, repoFilter, filePatternFilter []string, enabled bool) (*InstructionRow, error) {
+	if repoFilter == nil {
+		repoFilter = []string{}
+	}
+	if filePatternFilter == nil {
+		filePatternFilter = []string{}
+	}
+	const q = `
+		UPDATE review_instructions
+		SET name = $2, content = $3, repo_filter = $4, file_pattern_filter = $5, enabled = $6, updated_at = now()
+		WHERE id = $1
+		RETURNING id, org_id, name, content, repo_filter, file_pattern_filter, enabled, created_at, updated_at`
+
+	row := &InstructionRow{}
+	err := pool.QueryRow(ctx, q, id, name, content, repoFilter, filePatternFilter, enabled).Scan(
+		&row.ID, &row.OrgID, &row.Name, &row.Content, &row.RepoFilter, &row.FilePatternFilter, &row.Enabled, &row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, pgx.ErrNoRows
+		}
+		return nil, fmt.Errorf("UpdateInstruction: %w", err)
+	}
+	return row, nil
+}
+
+// DeleteInstruction deletes a review instruction by ID.
+func DeleteInstruction(ctx context.Context, pool *pgxpool.Pool, id string) error {
+	const q = `DELETE FROM review_instructions WHERE id = $1`
+	tag, err := pool.Exec(ctx, q, id)
+	if err != nil {
+		return fmt.Errorf("DeleteInstruction: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// ListEnabledInstructionsByOrg returns all enabled review instructions for an org.
+func ListEnabledInstructionsByOrg(ctx context.Context, pool *pgxpool.Pool, orgID string) ([]InstructionRow, error) {
+	const q = `
+		SELECT id, org_id, name, content, repo_filter, file_pattern_filter, enabled, created_at, updated_at
+		FROM review_instructions
+		WHERE org_id = $1 AND enabled = true
+		ORDER BY created_at`
+
+	rows, err := pool.Query(ctx, q, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("ListEnabledInstructionsByOrg: %w", err)
+	}
+	defer rows.Close()
+
+	var instructions []InstructionRow
+	for rows.Next() {
+		var i InstructionRow
+		if err := rows.Scan(&i.ID, &i.OrgID, &i.Name, &i.Content, &i.RepoFilter, &i.FilePatternFilter, &i.Enabled, &i.CreatedAt, &i.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ListEnabledInstructionsByOrg scan: %w", err)
+		}
+		instructions = append(instructions, i)
+	}
+	return instructions, rows.Err()
 }

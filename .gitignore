@@ -9,6 +9,9 @@ build/
 # Qdrant local data
 /db/
 
+# FastEmbed model cache (bind-mounted, survives docker compose down -v)
+/data/
+
 # Environment / secrets
 .env
 .env.local

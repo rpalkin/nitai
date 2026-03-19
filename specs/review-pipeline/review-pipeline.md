@@ -158,10 +158,11 @@ Instructions come from **two sources**, merged at review time:
 ### Organization Instructions (Admin Console)
 - Organization admins write free-text review instructions via the Admin Console
 - Each instruction has optional filter rules:
-  - Repository filter (specific repos or all)
-  - File pattern filter (globs, e.g., `*.go`, `src/**/*.ts`)
-  - Language filter
-- At review time, applicable instructions are resolved based on the PR's repo and changed files
+  - Repository filter (`repo_filter UUID[]` — specific repo IDs, or empty for all)
+  - File pattern filter (`file_pattern_filter TEXT[]` — globs, e.g., `*.go`, `src/*.ts`; uses Go `filepath.Match`, no `**` support)
+  - `enabled` flag — disabled instructions are excluded from resolution
+- At review time, `ResolveInstructions` RPC returns applicable instructions based on the PR's repo and changed files (AND logic: both repo and file filters must match if set; empty filter = match all)
+- Language filtering is handled on the frontend by mapping languages to file pattern globs
 
 ### Repository-Level Rules (`.review-rules.yaml`)
 - Developers can commit a `.review-rules.yaml` file to the repository root

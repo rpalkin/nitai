@@ -9,6 +9,7 @@ services:
 
   search-mcp:
     build: ./search-mcp
+    restart: on-failure
     depends_on:
       - qdrant
     ports:

@@ -165,7 +165,7 @@ func TestNew(t *testing.T) {
 
 ## Adding test cases
 
-See `specs/e2e-cases.md` for the full list of test cases (29 implemented, 5 skipped).
+See `specs/e2e-cases.md` for the full list of test cases (30 implemented, 5 skipped).
 
 Each test case should:
 1. Configure the mock servers for the scenario (e.g., specific MR diff, draft status)
@@ -188,7 +188,7 @@ Each test case should:
 - `llm.Reset()` clears both requests and `ResponseFunc`. Always set `ResponseFunc` **after** the initial `llm.Reset()` call in test setup.
 - Test 9 (`TestDuplicateDiffDedup`) completes in ~2s. The debounce timer only fires for cancelled invocations; after a normal completion it is skipped.
 
-## Current test cases (28 tests)
+## Current test cases (30 tests)
 
 | Test | Description |
 |---|---|
@@ -206,7 +206,8 @@ Each test case should:
 | `TestGitLab404ForMR` | GitLab 404 for MR → review fails. |
 | `TestReadFileToolGracefulDegradation` | LLM calls `read_file` without repo context → gets error → review still completes. |
 | `TestSearchCodebaseToolGracefulDegradation` | LLM calls `search_codebase` without collection → gets error → review completes. |
-| `TestSemanticSearch` | Full pipeline with SyncRepo + IndexRepo + search-MCP wired. |
+| `TestSemanticSearch` | Full pipeline with SyncRepo + IndexRepo + search-MCP. Asserts search results contain indexed code (`Foo`). |
+| `TestSearchCodebaseReturnsIndexedContent` | search_codebase returns real indexed content (`CalculateTotal`) from Qdrant via search-MCP. |
 | `TestRepoSyncerCloneFailure` | SyncRepo fails → review marked failed. |
 | `TestIndexerFailureGracefulDegradation` | IndexRepo fails → review proceeds without search. |
 | `TestReadFileToolWorksWithSyncedRepo` | File reader tool works against a synced bare clone. |

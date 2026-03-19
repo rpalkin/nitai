@@ -5,6 +5,7 @@ services:
   reviewer:
     environment:
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL}
+      SEARCH_TIMEOUT: "30"
       LOG_LEVEL: DEBUG
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -23,6 +24,7 @@ services:
       - "host.docker.internal:host-gateway"
   search-mcp:
     environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-test-key-not-used}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL}
     extra_hosts:
       - "host.docker.internal:host-gateway"

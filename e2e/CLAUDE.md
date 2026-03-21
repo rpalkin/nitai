@@ -162,6 +162,7 @@ func TestNew(t *testing.T) {
 | `mock_llm.go` | Mock OpenAI-compatible LLM server — returns tool-calling format responses |
 | `helpers.go` | `TestClients` (ConnectRPC), `PollReviewRun`, `SetupProviderAndRepo`, `StartStack`/`StopStack`, `QueryReviewRuns`/`WaitForReviewRun` (direct DB), `CommitFileToBareRepo` (add files to bare git repo for rules tests) |
 | `rules_test.go` | `.review-rules.yaml` tests: ignore filters, instructions, modified warning, missing file, all-files-ignored |
+| `org_instructions_test.go` | Org-level instruction tests: filtering by repo/file pattern, merging with YAML rules |
 | `docker-compose.e2e.yml` | Overlay: sets `OPENROUTER_BASE_URL` + `extra_hosts` to reach mock servers from containers |
 
 ## Adding test cases
@@ -189,7 +190,7 @@ Each test case should:
 - `llm.Reset()` clears both requests and `ResponseFunc`. Always set `ResponseFunc` **after** the initial `llm.Reset()` call in test setup.
 - Test 9 (`TestDuplicateDiffDedup`) completes in ~2s. The debounce timer only fires for cancelled invocations; after a normal completion it is skipped.
 
-## Current test cases (35 tests)
+## Current test cases (39 tests)
 
 | Test | Description |
 |---|---|
@@ -228,5 +229,9 @@ Each test case should:
 | `TestReviewRulesModifiedWarning` | Warning posted in summary when PR modifies `.review-rules.yaml`. |
 | `TestReviewRulesMissingFile` | Missing `.review-rules.yaml` is a silent no-op — review completes normally. |
 | `TestReviewRulesAllFilesIgnored` | All files matching ignore globs → review marked `skipped`, no LLM call. |
+| `TestOrgInstructionsInReviewPrompt` | Org-level instructions filtered by repo + file pattern appear in LLM prompt. |
+| `TestOrgInstructionsMergedWithYamlRules` | API instructions and `.review-rules.yaml` instructions both reach the LLM. |
+| `TestOrgInstructionsFilePatternFilter` | File pattern filter excludes instructions when no matching files in diff. |
+| `TestOrgInstructionsRepoFilter` | Repo filter includes/excludes instructions based on repo ID match. |
 
 **Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the debounce (configured via `DEBOUNCE_TIMEOUT=5s` in e2e). They complete in seconds instead of minutes. With parallel execution, the full suite completes in ~5-8 minutes (previously ~30-50 minutes). The suite timeout is 600s.

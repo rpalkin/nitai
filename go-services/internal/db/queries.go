@@ -210,3 +210,40 @@ func UpsertBranchIndex(ctx context.Context, pool *pgxpool.Pool, repoID, branch, 
 	}
 	return nil
 }
+
+// InstructionRow holds a review instruction from the database.
+type InstructionRow struct {
+	ID                string
+	Content           string
+	RepoFilter        []string
+	FilePatternFilter []string
+}
+
+// ResolveInstructionsForRepo returns all enabled instructions for the org
+// that owns the given repo. The query joins repositories -> providers -> review_instructions
+// to find instructions for the same org. Only enabled instructions are returned.
+func ResolveInstructionsForRepo(ctx context.Context, pool *pgxpool.Pool, repoID string) ([]InstructionRow, error) {
+	const q = `
+		SELECT ri.id, ri.content, ri.repo_filter, ri.file_pattern_filter
+		FROM review_instructions ri
+		JOIN providers p ON p.org_id = ri.org_id AND p.deleted_at IS NULL
+		JOIN repositories r ON r.provider_id = p.id AND r.id = $1
+		WHERE ri.enabled = true
+		ORDER BY ri.created_at`
+
+	rows, err := pool.Query(ctx, q, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("ResolveInstructionsForRepo: %w", err)
+	}
+	defer rows.Close()
+
+	var instructions []InstructionRow
+	for rows.Next() {
+		var inst InstructionRow
+		if err := rows.Scan(&inst.ID, &inst.Content, &inst.RepoFilter, &inst.FilePatternFilter); err != nil {
+			return nil, fmt.Errorf("ResolveInstructionsForRepo scan: %w", err)
+		}
+		instructions = append(instructions, inst)
+	}
+	return instructions, rows.Err()
+}

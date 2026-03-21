@@ -14,6 +14,7 @@ import (
 	"ai-reviewer/go-services/internal/difffetcher"
 	"ai-reviewer/go-services/internal/difffilter"
 	"ai-reviewer/go-services/internal/indexing"
+	"ai-reviewer/go-services/internal/instructions"
 	"ai-reviewer/go-services/internal/postreview"
 	"ai-reviewer/go-services/internal/reporules"
 	"ai-reviewer/go-services/internal/reposyncer"
@@ -205,6 +206,15 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		rules = reporules.ReviewRules{}
 	}
 
+	// Step 7b: Fetch org-level instructions from DB (non-fatal).
+	orgInstructionRows, err := restate.Run(ctx, func(restate.RunContext) ([]db.InstructionRow, error) {
+		return db.ResolveInstructionsForRepo(ctx, p.pool, req.RepoID)
+	})
+	if err != nil {
+		log.Printf("PRReview: resolving org instructions: %v", err)
+		orgInstructionRows = nil
+	}
+
 	// Step 8: Filter diff by ignore globs.
 	diff := fetchResp.Diff
 	changedFiles := fetchResp.ChangedFiles
@@ -278,6 +288,11 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 	}
 
 	// Step 11: Call the Python Reviewer service (cross-language via Restate).
+	// Resolve org instructions using the filtered changed files, then merge with YAML instructions.
+	mergedInstructions := instructions.Merge(
+		instructions.Resolve(orgInstructionRows, req.RepoID, changedFiles),
+		rules.Instructions,
+	)
 	reviewer, err := restate.Service[reviewerOutput](ctx, "Reviewer", "RunReview").
 		Request(reviewerInput{
 			Diff:               diff,
@@ -290,7 +305,7 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 			RepoPath:           syncResult.RepoPath,
 			TargetBranchSHA:    syncResult.HeadSHA,
 			SearchCollection:   collectionName,
-			CustomInstructions: rules.Instructions,
+			CustomInstructions: mergedInstructions,
 		})
 	if err != nil {
 		return fail(fmt.Errorf("running reviewer: %w", err))

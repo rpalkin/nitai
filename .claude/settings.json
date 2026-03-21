@@ -3,7 +3,24 @@
     "allow": [
       "Read(../tasks/**)",
       "Edit(../tasks/**)",
-      "Write(../tasks/**)"
+      "Write(../tasks/**)",
+      "Bash(task show:*)",
+      "Bash(task update:*)",
+      "Bash(task log-show:*)",
+      "Bash(task log:*)",
+      "Bash(task list:*)",
+      "Bash(go vet:*)",
+      "Bash(go test:*)",
+      "Bash(go build:*)",
+      "Bash(cd:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Skill(update-config)"
     ]
   }
 }

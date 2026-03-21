@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package api.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "ai-reviewer/gen/api/v1;apiv1";
+
+message ActivityLog {
+  string id = 1;
+  string org_id = 2;
+  string repo_id = 3;
+  string actor_id = 4;
+  string event_type = 5;
+  google.protobuf.Struct details = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message ListActivityLogsRequest {
+  string repo_id = 1;
+  string event_type = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message ListActivityLogsResponse {
+  repeated ActivityLog logs = 1;
+  int32 total_count = 2;
+}
+
+service ActivityService {
+  rpc ListActivityLogs(ListActivityLogsRequest) returns (ListActivityLogsResponse);
+}

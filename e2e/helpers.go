@@ -121,6 +121,7 @@ type TestClients struct {
 	Review      apiv1connect.ReviewServiceClient
 	Auth        apiv1connect.AuthServiceClient
 	Instruction apiv1connect.InstructionServiceClient
+	Activity    apiv1connect.ActivityServiceClient
 	BaseURL     string
 	Token       string // JWT token for authenticated requests
 }
@@ -133,6 +134,7 @@ func NewTestClients(baseURL string) *TestClients {
 		Review:      apiv1connect.NewReviewServiceClient(httpClient, baseURL),
 		Auth:        apiv1connect.NewAuthServiceClient(httpClient, baseURL),
 		Instruction: apiv1connect.NewInstructionServiceClient(httpClient, baseURL),
+		Activity:    apiv1connect.NewActivityServiceClient(httpClient, baseURL),
 		BaseURL:     baseURL,
 	}
 }
@@ -151,6 +153,7 @@ func NewAuthenticatedTestClients(baseURL, token string) *TestClients {
 		Review:      apiv1connect.NewReviewServiceClient(httpClient, baseURL),
 		Auth:        apiv1connect.NewAuthServiceClient(httpClient, baseURL),
 		Instruction: apiv1connect.NewInstructionServiceClient(httpClient, baseURL),
+		Activity:    apiv1connect.NewActivityServiceClient(httpClient, baseURL),
 		BaseURL:     baseURL,
 		Token:       token,
 	}
@@ -747,6 +750,19 @@ func CommitFileToBareRepo(t *testing.T, barePath, branch, filePath string, conte
 
 	runGit("add", filePath)
 	runGit("commit", "-m", "add "+filePath)
+
+	// For existing branches (e.g. "main"), pull-rebase before push to handle
+	// concurrent pushes from parallel tests.
+	pullCmd := exec.Command("git", "pull", "--rebase", "origin", branch)
+	pullCmd.Dir = workDir
+	pullCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	_ = pullCmd.Run() // ignore error for new branches with no upstream
+
 	runGit("push", "origin", branch)
 
 	// Get the SHA

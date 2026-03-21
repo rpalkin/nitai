@@ -10,10 +10,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	apiv1 "ai-reviewer/gen/api/v1"
-	"ai-reviewer/gen/api/v1/apiv1connect"
+	"ai-reviewer/api-server/internal/activitylog"
+	"ai-reviewer/api-server/internal/auth"
 	"ai-reviewer/api-server/internal/db"
 	"ai-reviewer/api-server/internal/restate"
+	apiv1 "ai-reviewer/gen/api/v1"
+	"ai-reviewer/gen/api/v1/apiv1connect"
 )
 
 // RepoHandler implements apiv1connect.RepoServiceHandler.
@@ -52,6 +54,15 @@ func (h *RepoHandler) EnableReview(ctx context.Context, req *connect.Request[api
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("repo_id is required"))
 	}
 
+	orgID, ok := auth.OrgIDFromContext(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+	var actorID *string
+	if uid, ok := auth.UserIDFromContext(ctx); ok {
+		actorID = &uid
+	}
+
 	row, err := db.SetReviewEnabled(ctx, h.pool, req.Msg.RepoId, true)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -59,6 +70,11 @@ func (h *RepoHandler) EnableReview(ctx context.Context, req *connect.Request[api
 		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("enabling review: %w", err))
 	}
+
+	activitylog.Log(ctx, h.pool, orgID, &req.Msg.RepoId, actorID, "repo.review_enabled", map[string]any{
+		"repo_name":      row.Name,
+		"repo_full_path": row.FullPath,
+	})
 
 	if h.restateClient != nil {
 		if err := h.restateClient.SendIndexMainBranch(ctx, req.Msg.RepoId, restate.IndexMainBranchRequest{
@@ -79,6 +95,15 @@ func (h *RepoHandler) DisableReview(ctx context.Context, req *connect.Request[ap
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("repo_id is required"))
 	}
 
+	orgID, ok := auth.OrgIDFromContext(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+	var actorID *string
+	if uid, ok := auth.UserIDFromContext(ctx); ok {
+		actorID = &uid
+	}
+
 	row, err := db.SetReviewEnabled(ctx, h.pool, req.Msg.RepoId, false)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -86,6 +111,11 @@ func (h *RepoHandler) DisableReview(ctx context.Context, req *connect.Request[ap
 		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disabling review: %w", err))
 	}
+
+	activitylog.Log(ctx, h.pool, orgID, &req.Msg.RepoId, actorID, "repo.review_disabled", map[string]any{
+		"repo_name":      row.Name,
+		"repo_full_path": row.FullPath,
+	})
 
 	return connect.NewResponse(&apiv1.DisableReviewResponse{
 		Repository: repoRowToProto(*row),

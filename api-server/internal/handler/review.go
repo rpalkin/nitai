@@ -9,10 +9,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	apiv1 "ai-reviewer/gen/api/v1"
-	"ai-reviewer/gen/api/v1/apiv1connect"
+	"ai-reviewer/api-server/internal/activitylog"
+	"ai-reviewer/api-server/internal/auth"
 	"ai-reviewer/api-server/internal/db"
 	"ai-reviewer/api-server/internal/restate"
+	apiv1 "ai-reviewer/gen/api/v1"
+	"ai-reviewer/gen/api/v1/apiv1connect"
 )
 
 // ReviewHandler implements apiv1connect.ReviewServiceHandler.
@@ -35,6 +37,15 @@ func (h *ReviewHandler) TriggerReview(ctx context.Context, req *connect.Request[
 	}
 	if msg.MrNumber <= 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("mr_number must be positive"))
+	}
+
+	orgID, ok := auth.OrgIDFromContext(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+	var actorID *string
+	if uid, ok := auth.UserIDFromContext(ctx); ok {
+		actorID = &uid
 	}
 
 	// Verify repo exists.
@@ -65,6 +76,11 @@ func (h *ReviewHandler) TriggerReview(ctx context.Context, req *connect.Request[
 	if err := db.UpdateReviewRunInvocationID(ctx, h.pool, runID, invocationID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("storing invocation id: %w", err))
 	}
+
+	activitylog.Log(ctx, h.pool, orgID, &msg.RepoId, actorID, "review.triggered", map[string]any{
+		"review_run_id": runID,
+		"mr_number":     msg.MrNumber,
+	})
 
 	run, err := db.GetReviewRun(ctx, h.pool, runID)
 	if err != nil {

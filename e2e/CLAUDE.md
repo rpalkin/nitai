@@ -163,6 +163,7 @@ func TestNew(t *testing.T) {
 | `helpers.go` | `TestClients` (ConnectRPC), `PollReviewRun`, `SetupProviderAndRepo`, `StartStack`/`StopStack`, `QueryReviewRuns`/`WaitForReviewRun` (direct DB), `CommitFileToBareRepo` (add files to bare git repo for rules tests) |
 | `rules_test.go` | `.review-rules.yaml` tests: ignore filters, instructions, modified warning, missing file, all-files-ignored |
 | `org_instructions_test.go` | Org-level instruction tests: filtering by repo/file pattern, merging with YAML rules |
+| `activity_log_test.go` | Activity log lifecycle test: event logging, filtering, pagination |
 | `docker-compose.e2e.yml` | Overlay: sets `OPENROUTER_BASE_URL` + `extra_hosts` to reach mock servers from containers |
 
 ## Adding test cases
@@ -190,7 +191,7 @@ Each test case should:
 - `llm.Reset()` clears both requests and `ResponseFunc`. Always set `ResponseFunc` **after** the initial `llm.Reset()` call in test setup.
 - Test 9 (`TestDuplicateDiffDedup`) completes in ~2s. The debounce timer only fires for cancelled invocations; after a normal completion it is skipped.
 
-## Current test cases (41 tests)
+## Current test cases (42 tests)
 
 | Test | Description |
 |---|---|
@@ -235,5 +236,6 @@ Each test case should:
 | `TestOrgInstructionsRepoFilter` | Repo filter includes/excludes instructions based on repo ID match. |
 | `TestReadFileReturnsMergeResultContent` | `read_file` returns content from merge result commit (combining source + target changes). |
 | `TestMergeConflictSkipsReview` | MR with merge conflicts → `status=conflicts`, no LLM call. |
+| `TestActivityLogLifecycle` | Activity log lifecycle: creates provider/repo/review, lists logs with filters and pagination. |
 
 **Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the debounce (configured via `DEBOUNCE_TIMEOUT=5s` in e2e). They complete in seconds instead of minutes. With parallel execution, the full suite completes in ~5-8 minutes (previously ~30-50 minutes). The suite timeout is 600s.

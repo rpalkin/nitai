@@ -92,6 +92,7 @@ func main() {
 	reviewHandler := handler.NewReviewHandler(pool, restateClient)
 	authHandler := handler.NewAuthHandler(pool, cfg.JWTSecret)
 	instructionHandler := handler.NewInstructionHandler(pool)
+	activityHandler := handler.NewActivityHandler(pool)
 
 	interceptorOpt := connect.WithInterceptors(authInterceptor)
 	recoverOpt := connect.WithRecover(recoverHandler)
@@ -100,6 +101,7 @@ func main() {
 	mux.Handle(apiv1connect.NewRepoServiceHandler(repoHandler, interceptorOpt, recoverOpt))
 	mux.Handle(apiv1connect.NewReviewServiceHandler(reviewHandler, interceptorOpt, recoverOpt))
 	mux.Handle(apiv1connect.NewInstructionServiceHandler(instructionHandler, interceptorOpt, recoverOpt))
+	mux.Handle(apiv1connect.NewActivityServiceHandler(activityHandler, interceptorOpt, recoverOpt))
 	mux.Handle("/webhooks/", handler.NewWebhookHandler(&handler.PoolWebhookStore{Pool: pool}, restateClient))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

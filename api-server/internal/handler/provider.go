@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"ai-reviewer/api-server/internal/activitylog"
+	"ai-reviewer/api-server/internal/auth"
 	"ai-reviewer/api-server/internal/db"
 	apiv1 "ai-reviewer/gen/api/v1"
 	"ai-reviewer/gen/api/v1/apiv1connect"
@@ -82,9 +84,13 @@ func (h *ProviderHandler) CreateProvider(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unsupported provider type"))
 	}
 
-	orgID, err := db.GetDefaultOrgID(ctx, h.pool)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("getting default org: %w", err))
+	orgID, ok := auth.OrgIDFromContext(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+	var actorID *string
+	if uid, ok := auth.UserIDFromContext(ctx); ok {
+		actorID = &uid
 	}
 
 	tokenEncrypted, err := crypto.Encrypt([]byte(msg.Token), h.encKey)
@@ -127,6 +133,12 @@ func (h *ProviderHandler) CreateProvider(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("creating provider: %w", err))
 	}
 
+	activitylog.Log(ctx, h.pool, orgID, nil, actorID, "provider.created", map[string]any{
+		"provider_id":   row.ID,
+		"provider_name": row.Name,
+		"provider_type": row.Type,
+	})
+
 	return connect.NewResponse(&apiv1.CreateProviderResponse{
 		Provider:      providerRowToProto(*row),
 		WebhookSecret: webhookSecret,
@@ -153,13 +165,35 @@ func (h *ProviderHandler) DeleteProvider(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id is required"))
 	}
 
-	err := db.SoftDeleteProvider(ctx, h.pool, req.Msg.Id)
+	orgID, ok := auth.OrgIDFromContext(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+	var actorID *string
+	if uid, ok := auth.UserIDFromContext(ctx); ok {
+		actorID = &uid
+	}
+
+	provider, err := db.GetProvider(ctx, h.pool, req.Msg.Id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("provider not found"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("getting provider: %w", err))
+	}
+
+	err = db.SoftDeleteProvider(ctx, h.pool, req.Msg.Id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("provider not found"))
 		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("deleting provider: %w", err))
 	}
+
+	activitylog.Log(ctx, h.pool, orgID, nil, actorID, "provider.deleted", map[string]any{
+		"provider_id":   req.Msg.Id,
+		"provider_name": provider.Name,
+	})
 
 	return connect.NewResponse(&apiv1.DeleteProviderResponse{}), nil
 }

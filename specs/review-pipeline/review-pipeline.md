@@ -159,6 +159,22 @@ Submit new invocation:
                       +---------------------------------------------+
 ```
 
+### Activity Logging
+
+User-initiated actions are logged to `activity_logs` via the API server:
+
+| Event | Handler | Details |
+|---|---|---|
+| `provider.created` | `ProviderHandler.CreateProvider` | `{provider_id, provider_name, provider_type}` |
+| `provider.deleted` | `ProviderHandler.DeleteProvider` | `{provider_id, provider_name}` |
+| `repo.review_enabled` | `RepoHandler.EnableReview` | `{repo_name, repo_full_path}` |
+| `repo.review_disabled` | `RepoHandler.DisableReview` | `{repo_name, repo_full_path}` |
+| `review.triggered` | `ReviewHandler.TriggerReview` | `{review_run_id, mr_number}` |
+
+Pipeline completion events (`review.completed`, `review.failed`) happen in go-services which lacks org context. These are tracked via `review_runs.status` and queryable via `GetReviewRun`.
+
+Webhook-triggered reviews don't log `review.triggered` because webhooks are unauthenticated (no `actor_id`).
+
 ### DiffFetcher
 
 **Tech:** Go handler in `DiffFetcher` service

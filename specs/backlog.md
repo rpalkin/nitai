@@ -168,7 +168,7 @@ A boolean `posted` flag doesn't capture partial failure well. If 8 of 10 comment
 ## Operational
 
 ### 19. No data retention policy
-Review comments, activity logs, and indexed data will grow indefinitely. Specify TTL/archival policies, especially for `ActivityLog` and old `PRReview` records.
+Review comments, activity logs, and indexed data will grow indefinitely. The `activity_logs` table now exists (migration 000013) but has no TTL/archival policy. Specify retention policies for `activity_logs` and old `PRReview` records.
 
 ### 20. Python workers are single-threaded by default
 Temporal Python workers use asyncio but don't parallelize CPU-bound work well. Embedding computation in the indexer is CPU/IO intensive. Consider specifying worker concurrency settings or running multiple worker replicas.

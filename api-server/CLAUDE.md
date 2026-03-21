@@ -44,6 +44,7 @@ make proto
   - `jwt.go` — HS256 token signing with 24h expiry, claims: user_id, org_id
   - `interceptor.go` — ConnectRPC unary interceptor with allow-list for unauthenticated endpoints (Register, Login)
 - **`config/`** — env var loading
+- **`activitylog/`** — fire-and-forget activity logging helper (`Log()` swallows errors to never fail the parent operation)
 - **`db/`** — pgx pool wrapper and hand-written queries
 - **`handler/`** — ConnectRPC handler implementations:
   - `auth.go` — `Register` (bcrypt password hashing, default org assignment), `Login` (credential verification), `GetMe` (authenticated user lookup)
@@ -51,6 +52,7 @@ make proto
   - `repo.go` — `ListRepos`, `EnableReview`, `DisableReview`
   - `review.go` — `TriggerReview` (creates review_run row, fires PRReview via Restate `/send`), `GetReviewRun`
   - `instruction.go` — `InstructionService` CRUD + `ResolveInstructions` (filters by repo_filter, file_pattern_filter using `filepath.Match`)
+  - `activity.go` — `ActivityHandler` with `ListActivityLogs` (paginated, filterable by repo_id and event_type)
   - `webhook.go` — `POST /webhooks/{provider_id}` handler for GitLab MR events. Validates `X-Gitlab-Token`, filters non-MR/non-reviewable actions, handles draft→ready transitions, cancels existing invocations (debounce), dispatches via Restate. Uses `WebhookStore` and `RestateDispatcher` interfaces for testability.
   - `mapper.go` — DB row to protobuf response mapping
 - **`restate/`** — HTTP client for Restate ingress and admin API. `SendPRReview` posts fire-and-forget to `/PRReview/{key}/Run/send` (202). `CancelInvocation` patches `/invocations/{id}/cancel` via admin API (404 silently ignored).
@@ -73,15 +75,18 @@ SQL files in `migrations/` managed by golang-migrate, embedded in the binary:
 - `000009_default_branch` — adds `default_branch TEXT NOT NULL DEFAULT 'main'` to repositories
 - `000010_users` — creates `users` table (id, org_id, email, password_hash) with unique email constraint
 - `000011_review_instructions` — creates `review_instructions` table (id, org_id, name, content, repo_filter UUID[], file_pattern_filter TEXT[], enabled, timestamps)
+- `000012_conflicts_status` — adds `conflicts` value to review_status enum
+- `000013_activity_logs` — creates `activity_logs` table (id, org_id, repo_id nullable, actor_id nullable, event_type, details JSONB, created_at) with indexes on (org_id, created_at), (org_id, event_type), (repo_id)
 
 ### HTTP Endpoints
 
-- ConnectRPC services: `AuthService`, `ProviderService`, `RepoService`, `ReviewService`, `InstructionService` (generated paths from protobuf)
+- ConnectRPC services: `AuthService`, `ProviderService`, `RepoService`, `ReviewService`, `InstructionService`, `ActivityService` (generated paths from protobuf)
   - `AuthService/Register` — Create new user account (unauthenticated)
   - `AuthService/Login` — Authenticate and get JWT (unauthenticated)
   - `AuthService/GetMe` — Get current authenticated user
   - `InstructionService/CreateInstruction`, `ListInstructions`, `UpdateInstruction`, `DeleteInstruction` — CRUD for org-scoped review instructions
   - `InstructionService/ResolveInstructions` — Returns applicable instructions given repo_id + changed_files
+  - `ActivityService/ListActivityLogs` — Paginated activity log query with optional repo_id and event_type filters
 - `POST /webhooks/{provider_id}` — GitLab webhook receiver (unauthenticated)
 - `GET /healthz` — health check (unauthenticated)
 
@@ -103,4 +108,4 @@ SQL files in `migrations/` managed by golang-migrate, embedded in the binary:
 
 ### Protobuf
 
-API definitions in `proto/api/v1/` (auth.proto, provider.proto, repo.proto, review.proto, instruction.proto). Generated Go code in `gen/go/`, imported as `ai-reviewer/gen`. Code generation: `make proto` (uses buf).
+API definitions in `proto/api/v1/` (auth.proto, provider.proto, repo.proto, review.proto, instruction.proto, activity.proto). Generated Go code in `gen/go/`, imported as `ai-reviewer/gen`. Code generation: `make proto` (uses buf).

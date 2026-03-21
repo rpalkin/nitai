@@ -632,3 +632,74 @@ func ListEnabledInstructionsByOrg(ctx context.Context, pool *pgxpool.Pool, orgID
 	}
 	return instructions, rows.Err()
 }
+
+type ActivityLogRow struct {
+	ID        string
+	OrgID     string
+	RepoID    *string
+	ActorID   *string
+	EventType string
+	Details   []byte
+	CreatedAt time.Time
+}
+
+func InsertActivityLog(ctx context.Context, pool *pgxpool.Pool, orgID string, repoID, actorID *string, eventType string, details []byte) error {
+	const q = `
+		INSERT INTO activity_logs (org_id, repo_id, actor_id, event_type, details)
+		VALUES ($1, $2, $3, $4, $5)`
+	_, err := pool.Exec(ctx, q, orgID, repoID, actorID, eventType, details)
+	if err != nil {
+		return fmt.Errorf("InsertActivityLog: %w", err)
+	}
+	return nil
+}
+
+func ListActivityLogs(ctx context.Context, pool *pgxpool.Pool, orgID string, repoID, eventType *string, limit, offset int) ([]ActivityLogRow, int, error) {
+	baseQuery := `SELECT id, org_id, repo_id, actor_id, event_type, details, created_at FROM activity_logs WHERE org_id = $1`
+	countQuery := `SELECT COUNT(*) FROM activity_logs WHERE org_id = $1`
+	args := []any{orgID}
+	argNum := 2
+
+	if repoID != nil {
+		baseQuery += fmt.Sprintf(" AND repo_id = $%d", argNum)
+		countQuery += fmt.Sprintf(" AND repo_id = $%d", argNum)
+		args = append(args, *repoID)
+		argNum++
+	}
+	if eventType != nil {
+		baseQuery += fmt.Sprintf(" AND event_type = $%d", argNum)
+		countQuery += fmt.Sprintf(" AND event_type = $%d", argNum)
+		args = append(args, *eventType)
+		argNum++
+	}
+
+	baseQuery += " ORDER BY created_at DESC"
+	baseQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argNum, argNum+1)
+	args = append(args, limit, offset)
+
+	rows, err := pool.Query(ctx, baseQuery, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("ListActivityLogs query: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []ActivityLogRow
+	for rows.Next() {
+		var l ActivityLogRow
+		if err := rows.Scan(&l.ID, &l.OrgID, &l.RepoID, &l.ActorID, &l.EventType, &l.Details, &l.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("ListActivityLogs scan: %w", err)
+		}
+		logs = append(logs, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("ListActivityLogs rows: %w", err)
+	}
+
+	countArgs := args[:argNum-1]
+	var totalCount int
+	if err := pool.QueryRow(ctx, countQuery, countArgs...).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("ListActivityLogs count: %w", err)
+	}
+
+	return logs, totalCount, nil
+}

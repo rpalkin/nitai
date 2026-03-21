@@ -121,32 +121,12 @@ func TestDraftToReadyTransition(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
+	// First webhook: draft MR (no review)
 	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Add order processing",
-            "description": "Implements order handler",
-            "author": {"username": "alice"},
-            "source_branch": "feature/orders",
-            "target_branch": "main",
-            "sha": "bbb222",
-            "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{
-                "old_path": "src/handler.go",
-                "new_path": "src/handler.go",
-                "diff": "@@ -10,6 +10,12 @@ package handler\n import \"fmt\"\n \n+func ProcessOrder(order *Order) error {\n+    result := CalculateTotal(order.Items)\n+    if result == nil {\n+        return nil\n+    }\n+    fmt.Println(result)\n+    return nil\n+}",
-                "new_file": false, "deleted_file": false, "renamed_file": false
-            }]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1,
-            "head_commit_sha": "bbb222",
-            "base_commit_sha": "aaa111",
-            "start_commit_sha": "aaa111"
-        }]`),
+		Details:  json.RawMessage(`{"title": "Add order processing", "description": "Implements order handler", "author": {"username": "alice"}, "source_branch": "` + fixtures.SimpleChange.SourceBranch + `", "target_branch": "` + fixtures.SimpleChange.TargetBranch + `", "sha": "` + fixtures.SimpleChange.HeadSHA + `", "draft": true}`),
+		Changes:  fixtures.SimpleChange.Changes,
+		Versions: fixtures.SimpleChange.Versions,
 	})
-	llm.DefaultResponse = defaultLLMResponse
 
 	// Step 1: Send draft webhook
 	resp := tc.SendWebhook(map[string]any{
@@ -161,7 +141,8 @@ func TestDraftToReadyTransition(t *testing.T) {
 		t.Errorf("expected 0 LLM calls after draft webhook, got %d", tc.LLMRequestCount())
 	}
 
-	// Step 2: Send draft→ready transition webhook
+	// Step 2: Send draft→ready transition webhook (use SetMRFromBranch which sets draft=false)
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Add order processing", "Implements order handler", "alice")
 	resp2 := tc.SendWebhook(map[string]any{
 		"object_kind": "merge_request",
 		"object_attributes": map[string]any{
@@ -223,23 +204,7 @@ func TestDisableReviewStopsWebhook(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Fix bug", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/fix", "target_branch": "main",
-            "sha": "disab111", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "fix.go", "new_path": "fix.go",
-            "diff": "@@ -1,2 +1,3 @@\n package main\n+// fix\n func F() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "disab111",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Fix bug", "", "alice")
 	llm.DefaultResponse = defaultLLMResponse
 
 	// First webhook → review completes

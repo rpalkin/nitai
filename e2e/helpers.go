@@ -676,6 +676,249 @@ func parseInt64(s string) (int64, error) {
 	return result, err
 }
 
+// MRBranchResult contains real git data for configuring a mock MR.
+type MRBranchResult struct {
+	BaseSHA      string          // commit SHA on target branch (before changes)
+	HeadSHA      string          // commit SHA on feature branch (after changes)
+	SourceBranch string          // feature branch name
+	TargetBranch string          // base branch name (e.g. "main")
+	Changes      json.RawMessage // GitLab-format changes JSON (computed via git diff)
+	Versions     json.RawMessage // GitLab-format versions JSON
+}
+
+// CreateMRBranch creates a feature branch with the given file changes on the shared bare repo.
+// It commits the files, computes the diff against the base branch, and returns all data
+// needed to configure a realistic MR in the mock GitLab.
+//
+// Parameters:
+//   - t: testing T interface (supports both *testing.T and testingT)
+//   - barePath: path to the bare git repo
+//   - branchName: name for the feature branch (should be unique per test)
+//   - baseBranch: target branch to diff against (usually "main")
+//   - files: map of file path -> content to commit on the feature branch
+//
+// Returns MRBranchResult with real SHAs and computed diff.
+func CreateMRBranch(t testingT, barePath, branchName, baseBranch string, files map[string]string) *MRBranchResult {
+	// Check branch uniqueness
+	checkCmd := exec.Command("git", "--git-dir="+barePath, "rev-parse", "--verify", "refs/heads/"+branchName)
+	if err := checkCmd.Run(); err == nil {
+		t.Fatalf("CreateMRBranch: branch %q already exists in bare repo", branchName)
+	}
+
+	// Get base branch HEAD SHA
+	baseCmd := exec.Command("git", "--git-dir="+barePath, "rev-parse", "refs/heads/"+baseBranch)
+	baseOut, err := baseCmd.Output()
+	if err != nil {
+		t.Fatalf("CreateMRBranch: get base SHA: %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(baseOut))
+
+	// Clone to temp working directory
+	workDir, err := os.MkdirTemp("", "e2e-mr-branch-*")
+	if err != nil {
+		t.Fatalf("CreateMRBranch: temp dir: %v", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	cloneCmd := exec.Command("git", "clone", barePath, workDir)
+	cloneCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=E2E Test",
+		"GIT_AUTHOR_EMAIL=e2e@test.com",
+		"GIT_COMMITTER_NAME=E2E Test",
+		"GIT_COMMITTER_EMAIL=e2e@test.com",
+	)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("CreateMRBranch: clone: %v\n%s", err, out)
+	}
+
+	// Create and checkout branch from base
+	checkoutCmd := exec.Command("git", "checkout", "-b", branchName, "origin/"+baseBranch)
+	checkoutCmd.Dir = workDir
+	checkoutCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=E2E Test",
+		"GIT_AUTHOR_EMAIL=e2e@test.com",
+		"GIT_COMMITTER_NAME=E2E Test",
+		"GIT_COMMITTER_EMAIL=e2e@test.com",
+	)
+	if out, err := checkoutCmd.CombinedOutput(); err != nil {
+		t.Fatalf("CreateMRBranch: checkout -b %s: %v\n%s", branchName, err, out)
+	}
+
+	// Write files
+	for filePath, content := range files {
+		absPath := filepath.Join(workDir, filePath)
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			t.Fatalf("CreateMRBranch: mkdir %s: %v", filepath.Dir(absPath), err)
+		}
+		if err := os.WriteFile(absPath, []byte(content), 0644); err != nil {
+			t.Fatalf("CreateMRBranch: write %s: %v", filePath, err)
+		}
+	}
+
+	// Add and commit
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=E2E Test",
+			"GIT_AUTHOR_EMAIL=e2e@test.com",
+			"GIT_COMMITTER_NAME=E2E Test",
+			"GIT_COMMITTER_EMAIL=e2e@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("CreateMRBranch: git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "E2E test commit for "+branchName)
+
+	// Push to bare
+	pushCmd := exec.Command("git", "push", "origin", branchName)
+	pushCmd.Dir = workDir
+	pushCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=E2E Test",
+		"GIT_AUTHOR_EMAIL=e2e@test.com",
+		"GIT_COMMITTER_NAME=E2E Test",
+		"GIT_COMMITTER_EMAIL=e2e@test.com",
+	)
+	if out, err := pushCmd.CombinedOutput(); err != nil {
+		t.Fatalf("CreateMRBranch: push: %v\n%s", err, out)
+	}
+
+	// Get HEAD SHA
+	revCmd := exec.Command("git", "rev-parse", "HEAD")
+	revCmd.Dir = workDir
+	revOut, err := revCmd.Output()
+	if err != nil {
+		t.Fatalf("CreateMRBranch: rev-parse HEAD: %v", err)
+	}
+	headSHA := strings.TrimSpace(string(revOut))
+
+	// Compute diff
+	diffCmd := exec.Command("git", "diff", baseSHA+".."+headSHA)
+	diffCmd.Dir = workDir
+	diffOut, err := diffCmd.Output()
+	if err != nil {
+		t.Fatalf("CreateMRBranch: diff: %v", err)
+	}
+
+	// Update server-info on bare repo
+	updateCmd := exec.Command("git", "--git-dir="+barePath, "update-server-info")
+	if out, err := updateCmd.CombinedOutput(); err != nil {
+		t.Logf("warning: update-server-info: %v\n%s", err, out)
+	}
+
+	// Parse diff into GitLab changes format
+	changesJSON := parseUnifiedDiffToGitLabChanges(string(diffOut))
+
+	// Build versions JSON
+	versionsJSON, err := json.Marshal([]map[string]any{
+		{
+			"id":               1,
+			"head_commit_sha":  headSHA,
+			"base_commit_sha":  baseSHA,
+			"start_commit_sha": baseSHA,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateMRBranch: marshal versions: %v", err)
+	}
+
+	t.Logf("CreateMRBranch: created %s at %s (base=%s)", branchName, headSHA[:8], baseSHA[:8])
+
+	return &MRBranchResult{
+		BaseSHA:      baseSHA,
+		HeadSHA:      headSHA,
+		SourceBranch: branchName,
+		TargetBranch: baseBranch,
+		Changes:      changesJSON,
+		Versions:     json.RawMessage(versionsJSON),
+	}
+}
+
+// parseUnifiedDiffToGitLabChanges converts a unified diff output into GitLab's changes JSON format.
+func parseUnifiedDiffToGitLabChanges(diffOutput string) json.RawMessage {
+	var changes []map[string]any
+
+	// Split on "diff --git" headers
+	sections := strings.Split(diffOutput, "diff --git ")
+	for _, section := range sections {
+		if strings.TrimSpace(section) == "" {
+			continue
+		}
+
+		// Parse the diff header: a/X b/Y
+		lines := strings.SplitN(section, "\n", 2)
+		if len(lines) < 2 {
+			continue
+		}
+		header := strings.TrimSpace(lines[0])
+
+		// Extract old_path and new_path from "a/X b/Y" or "a/X b/X" (same path)
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		oldPath := strings.TrimPrefix(parts[0], "a/")
+		newPath := strings.TrimPrefix(parts[1], "b/")
+
+		// Find the diff content (from first @@ onwards)
+		rest := lines[1]
+		atIndex := strings.Index(rest, "@@")
+		var diffContent string
+		if atIndex >= 0 {
+			// Include all @@ sections for this file
+			diffContent = rest[atIndex:]
+		}
+
+		// Detect file status
+		newFile := strings.Contains(rest, "--- /dev/null")
+		deletedFile := strings.Contains(rest, "+++ /dev/null")
+		renamedFile := oldPath != newPath && !newFile && !deletedFile
+
+		change := map[string]any{
+			"old_path":     oldPath,
+			"new_path":     newPath,
+			"diff":         diffContent,
+			"new_file":     newFile,
+			"deleted_file": deletedFile,
+			"renamed_file": renamedFile,
+		}
+		changes = append(changes, change)
+	}
+
+	result := map[string]any{"changes": changes}
+	resultJSON, _ := json.Marshal(result)
+	return json.RawMessage(resultJSON)
+}
+
+// SetMRFromBranch configures the mock GitLab MR using real git data from an MRBranchResult.
+// Builds Details, Changes, and Versions JSON, then delegates to tc.SetMR().
+// The marker is injected into the title automatically by SetMR.
+func (tc *TestContext) SetMRFromBranch(result *MRBranchResult, title, description, author string) {
+	tc.T.Helper()
+
+	details := map[string]any{
+		"title":         title,
+		"description":   description,
+		"author":        map[string]string{"username": author},
+		"source_branch": result.SourceBranch,
+		"target_branch": result.TargetBranch,
+		"sha":           result.HeadSHA,
+		"draft":         false,
+	}
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		tc.T.Fatalf("SetMRFromBranch: marshal details: %v", err)
+	}
+
+	tc.SetMR(&MRConfig{
+		Details:  json.RawMessage(detailsJSON),
+		Changes:  result.Changes,
+		Versions: result.Versions,
+	})
+}
+
 // CommitFileToBareRepo commits a file to the bare git repo on a specified branch.
 // It creates the branch if it doesn't exist. Returns the commit SHA.
 // This is used by rules tests to add .review-rules.yaml files.

@@ -15,31 +15,7 @@ func TestDuplicateDiffDedup(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Add order processing",
-            "description": "Implements order handler",
-            "author": {"username": "alice"},
-            "source_branch": "feature/orders",
-            "target_branch": "main",
-            "sha": "dedup222",
-            "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{
-                "old_path": "src/handler.go",
-                "new_path": "src/handler.go",
-                "diff": "@@ -1,3 +1,4 @@\n package handler\n+// dedup test\n func Foo() {}",
-                "new_file": false, "deleted_file": false, "renamed_file": false
-            }]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1,
-            "head_commit_sha": "dedup222",
-            "base_commit_sha": "aaa111",
-            "start_commit_sha": "aaa111"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Add order processing", "Implements order handler", "alice")
 	llm.DefaultResponse = defaultLLMResponse
 
 	webhookPayload := map[string]any{
@@ -58,7 +34,7 @@ func TestDuplicateDiffDedup(t *testing.T) {
 		t.Errorf("expected 1 LLM call after first webhook, got %d", tc.LLMRequestCount())
 	}
 
-	// Second identical webhook — same sha, dedup should mark run as skipped
+	// Second identical webhook — same SHA, dedup should mark run as skipped
 	// Smart debounce may add ~3 min delay before the second invocation processes
 	t.Log("sending second webhook (same sha), waiting for dedup skipped status...")
 	resp2 := tc.SendWebhook(webhookPayload)
@@ -75,23 +51,8 @@ func TestReReviewOnNewPush(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Feature branch", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/x", "target_branch": "main",
-            "sha": "rerv1sha0", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "a.go", "new_path": "a.go",
-            "diff": "@@ -1,2 +1,3 @@\n package a\n+// push1\n func A() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "rerv1sha0",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	// First push: use fixture
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Feature branch", "", "alice")
 	llm.DefaultResponse = defaultLLMResponse
 
 	// First webhook
@@ -107,24 +68,28 @@ func TestReReviewOnNewPush(t *testing.T) {
 		t.Errorf("expected 1 LLM call after first push, got %d", tc.LLMRequestCount())
 	}
 
-	// Update MR to a new SHA (simulates new push with different changes)
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Feature branch", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/x", "target_branch": "main",
-            "sha": "rerv2sha0", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "a.go", "new_path": "a.go",
-            "diff": "@@ -1,2 +1,3 @@\n package a\n+// push2 changed content\n func A() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 2, "head_commit_sha": "rerv2sha0",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
+	// Second push: create a new branch with different content
+	secondBranch := "re-review-v2-" + tc.MRIID
+	secondResult := CreateMRBranch(t, bareRepoPath, secondBranch, "main", map[string]string{
+		"src/handler.go": `package handler
+
+import "fmt"
+
+// ProcessOrder handles order processing logic.
+// UPDATED: second push with different content.
+func ProcessOrder(order *Order) error {
+	result := CalculateTotal(order.Items)
+	if result == nil {
+		return nil
+	}
+	fmt.Println(result)
+	return nil
+}
+`,
 	})
+
+	// Update MR to new SHA
+	tc.SetMRFromBranch(secondResult, "Feature branch (updated)", "", "alice")
 
 	// Second webhook (new push, different SHA — no debounce since first completed normally)
 	resp2 := tc.SendWebhook(map[string]any{
@@ -176,23 +141,7 @@ func TestCancelOnNewPush(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Cancel test v1", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/cancel", "target_branch": "main",
-            "sha": "canc1v1s0", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "c.go", "new_path": "c.go",
-            "diff": "@@ -1,2 +1,3 @@\n package c\n+// cancel v1\n func C() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "canc1v1s0",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Cancel test v1", "", "alice")
 
 	// Block the first LLM response so the first review is in-flight when the second webhook arrives.
 	// The second webhook triggers Restate to cancel the first invocation and start a new one.
@@ -236,24 +185,28 @@ func TestCancelOnNewPush(t *testing.T) {
 	}
 	t.Log("first LLM call received; sending second webhook to trigger Restate cancellation")
 
-	// Update MR to new SHA and send second webhook (cancels first in-flight review)
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Cancel test v2", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/cancel", "target_branch": "main",
-            "sha": "canc1v2s0", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "c.go", "new_path": "c.go",
-            "diff": "@@ -1,2 +1,3 @@\n package c\n+// cancel v2 supersedes\n func C() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 2, "head_commit_sha": "canc1v2s0",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
+	// Second push: create a new branch with different content
+	secondBranch := "cancel-v2-" + tc.MRIID
+	secondResult := CreateMRBranch(t, bareRepoPath, secondBranch, "main", map[string]string{
+		"src/handler.go": `package handler
+
+import "fmt"
+
+// ProcessOrder handles order processing logic.
+// CANCEL TEST V2 - this content replaces the first push.
+func ProcessOrder(order *Order) error {
+	result := CalculateTotal(order.Items)
+	if result == nil {
+		return nil
+	}
+	fmt.Println(result)
+	return nil
+}
+`,
 	})
+
+	// Update MR to new SHA and send second webhook (cancels first in-flight review)
+	tc.SetMRFromBranch(secondResult, "Cancel test v2", "", "alice")
 	resp2 := tc.SendWebhook(map[string]any{
 		"object_kind": "merge_request",
 		"object_attributes": map[string]any{
@@ -300,23 +253,7 @@ func TestDebounceRapidPushes(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Rapid push v1", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/rapid", "target_branch": "main",
-            "sha": "dbnc1sha0", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "d.go", "new_path": "d.go",
-            "diff": "@@ -1,2 +1,3 @@\n package d\n+// debounce v1\n func D() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "dbnc1sha0",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Rapid push v1", "", "alice")
 	llm.DefaultResponse = defaultLLMResponse
 
 	// Send first webhook
@@ -328,24 +265,28 @@ func TestDebounceRapidPushes(t *testing.T) {
 	})
 	resp.Body.Close()
 
-	// Immediately update to a new SHA and send second webhook (cancels first)
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Rapid push v2", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/rapid", "target_branch": "main",
-            "sha": "dbnc2sha0", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "d.go", "new_path": "d.go",
-            "diff": "@@ -1,2 +1,3 @@\n package d\n+// debounce v2 wins\n func D() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 2, "head_commit_sha": "dbnc2sha0",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
+	// Create second branch with different content
+	secondBranch := "debounce-v2-" + tc.MRIID
+	secondResult := CreateMRBranch(t, bareRepoPath, secondBranch, "main", map[string]string{
+		"src/handler.go": `package handler
+
+import "fmt"
+
+// ProcessOrder handles order processing logic.
+// DEBOUNCE V2 - this content supersedes the first.
+func ProcessOrder(order *Order) error {
+	result := CalculateTotal(order.Items)
+	if result == nil {
+		return nil
+	}
+	fmt.Println(result)
+	return nil
+}
+`,
 	})
+
+	// Immediately update to a new SHA and send second webhook (cancels first)
+	tc.SetMRFromBranch(secondResult, "Rapid push v2", "", "alice")
 	resp2 := tc.SendWebhook(map[string]any{
 		"object_kind": "merge_request",
 		"object_attributes": map[string]any{
@@ -396,43 +337,11 @@ func TestConcurrentMRReviews(t *testing.T) {
 		gitlab.ResetForMR(tc2.ProjectID, tc2.MRIID)
 	})
 
-	// Set up first MR
-	tc1.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Feature A", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/a", "target_branch": "main",
-            "sha": "concsha10", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "a.go", "new_path": "a.go",
-            "diff": "@@ -1,2 +1,3 @@\n package a\n+// concurrent MR1\n func A() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "concsha10",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	// Set up first MR using SimpleChange fixture
+	tc1.SetMRFromBranch(fixtures.SimpleChange, "Feature A", "", "alice")
 
-	// Set up second MR
-	tc2.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Feature B", "description": "",
-            "author": {"username": "bob"},
-            "source_branch": "feature/b", "target_branch": "main",
-            "sha": "concsha20", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "b.go", "new_path": "b.go",
-            "diff": "@@ -1,2 +1,3 @@\n package b\n+// concurrent MR2\n func B() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "concsha20",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	// Set up second MR using NewFile fixture (different diff content)
+	tc2.SetMRFromBranch(fixtures.NewFile, "Feature B", "", "bob")
 	llm.DefaultResponse = defaultLLMResponse
 
 	// Send webhooks for both MRs near-simultaneously

@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -17,34 +16,8 @@ func TestFullPipelineViaTriggerReview(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	t.Log("--- Setup: configuring mock GitLab for MR ---")
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Add order processing",
-            "description": "Implements order handler",
-            "author": {"username": "alice"},
-            "source_branch": "feature/orders",
-            "target_branch": "main",
-            "sha": "bbb222",
-            "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{
-                "old_path": "src/handler.go",
-                "new_path": "src/handler.go",
-                "diff": "@@ -10,6 +10,12 @@ package handler\n import \"fmt\"\n \n+func ProcessOrder(order *Order) error {\n+    result := CalculateTotal(order.Items)\n+    if result == nil {\n+        return nil\n+    }\n+    fmt.Println(result)\n+    return nil\n+}",
-                "new_file": false, "deleted_file": false, "renamed_file": false
-            }]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1,
-            "head_commit_sha": "bbb222",
-            "base_commit_sha": "aaa111",
-            "start_commit_sha": "aaa111"
-        }]`),
-	})
-
-	t.Log("configuring mock LLM default response")
+	t.Log("--- Setup: configuring mock GitLab for MR with real git data ---")
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Add order processing", "Implements order handler", "alice")
 	llm.DefaultResponse = defaultLLMResponse
 
 	t.Logf("--- Step 4: TriggerReview (repoID=%s, MR=%s) ---", tc.RepoID, tc.MRIID)
@@ -139,14 +112,14 @@ func TestFullPipelineViaTriggerReview(t *testing.T) {
 
 	t.Log("A10: checking SHA values in discussion positions")
 	for i, d := range discussions {
-		if d.Position.BaseSHA != "aaa111" {
-			t.Errorf("disc[%d] base_sha = %q, want %q", i, d.Position.BaseSHA, "aaa111")
+		if d.Position.BaseSHA != fixtures.SimpleChange.BaseSHA {
+			t.Errorf("disc[%d] base_sha = %q, want %q", i, d.Position.BaseSHA, fixtures.SimpleChange.BaseSHA)
 		}
-		if d.Position.HeadSHA != "bbb222" {
-			t.Errorf("disc[%d] head_sha = %q, want %q", i, d.Position.HeadSHA, "bbb222")
+		if d.Position.HeadSHA != fixtures.SimpleChange.HeadSHA {
+			t.Errorf("disc[%d] head_sha = %q, want %q", i, d.Position.HeadSHA, fixtures.SimpleChange.HeadSHA)
 		}
-		if d.Position.StartSHA != "aaa111" {
-			t.Errorf("disc[%d] start_sha = %q, want %q", i, d.Position.StartSHA, "aaa111")
+		if d.Position.StartSHA != fixtures.SimpleChange.BaseSHA {
+			t.Errorf("disc[%d] start_sha = %q, want %q", i, d.Position.StartSHA, fixtures.SimpleChange.BaseSHA)
 		}
 	}
 
@@ -180,32 +153,8 @@ func TestFullPipelineViaWebhook(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	t.Log("--- Setup: configuring mock GitLab for MR ---")
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Add order processing",
-            "description": "Implements order handler",
-            "author": {"username": "alice"},
-            "source_branch": "feature/orders",
-            "target_branch": "main",
-            "sha": "bbb222",
-            "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{
-                "old_path": "src/handler.go",
-                "new_path": "src/handler.go",
-                "diff": "@@ -10,6 +10,12 @@ package handler\n import \"fmt\"\n \n+func ProcessOrder(order *Order) error {\n+    result := CalculateTotal(order.Items)\n+    if result == nil {\n+        return nil\n+    }\n+    fmt.Println(result)\n+    return nil\n+}",
-                "new_file": false, "deleted_file": false, "renamed_file": false
-            }]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1,
-            "head_commit_sha": "bbb222",
-            "base_commit_sha": "aaa111",
-            "start_commit_sha": "aaa111"
-        }]`),
-	})
+	t.Log("--- Setup: configuring mock GitLab for MR with real git data ---")
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Add order processing", "Implements order handler", "alice")
 	llm.DefaultResponse = defaultLLMResponse
 
 	t.Log("--- Sending webhook for MR, action=open ---")
@@ -271,23 +220,7 @@ func TestSingleRunPerWebhookReview(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Single run test", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/single", "target_branch": "main",
-            "sha": "singlerun1", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "single.go", "new_path": "single.go",
-            "diff": "@@ -1,2 +1,3 @@\n package single\n+// single run test\n func Single() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "singlerun1",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.NewFile, "Single run test", "", "alice")
 	llm.DefaultResponse = defaultLLMResponse
 
 	// Send webhook

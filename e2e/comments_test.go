@@ -16,23 +16,7 @@ func TestZeroInlineComments(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Clean change", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/clean", "target_branch": "main",
-            "sha": "zero1111", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "z.go", "new_path": "z.go",
-            "diff": "@@ -1,2 +1,3 @@\n package z\n+// clean code\n func Z() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "zero1111",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Clean change", "", "alice")
 
 	// LLM returns a review with summary but no inline comments
 	tc.SetResponseFunc(func(reqBody []byte) (int, json.RawMessage) {
@@ -82,23 +66,7 @@ func TestManyInlineComments(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Big PR", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/big", "target_branch": "main",
-            "sha": "many1111", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "big.go", "new_path": "big.go",
-            "diff": "@@ -1,2 +1,52 @@\n package big\n+// many issues here\n func Big() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "many1111",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Big PR", "", "alice")
 
 	// Build a response with 50 inline comments
 	type comment struct {
@@ -114,7 +82,7 @@ func TestManyInlineComments(t *testing.T) {
 	comments := make([]comment, 50)
 	for i := range comments {
 		comments[i] = comment{
-			FilePath:  "big.go",
+			FilePath:  "src/handler.go",
 			LineStart: i + 1,
 			LineEnd:   i + 1,
 			Body:      fmt.Sprintf("Issue %d: consider refactoring this line.", i+1),

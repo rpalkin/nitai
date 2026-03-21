@@ -22,31 +22,7 @@ func TestReadFileToolGracefulDegradation(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Add order processing",
-            "description": "Implements order handler",
-            "author": {"username": "alice"},
-            "source_branch": "feature/orders",
-            "target_branch": "main",
-            "sha": "bbb222",
-            "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{
-                "old_path": "src/handler.go",
-                "new_path": "src/handler.go",
-                "diff": "@@ -10,6 +10,12 @@ package handler\n import \"fmt\"\n \n+func ProcessOrder(order *Order) error {\n+    result := CalculateTotal(order.Items)\n+    if result == nil {\n+        return nil\n+    }\n+    fmt.Println(result)\n+    return nil\n+}",
-                "new_file": false, "deleted_file": false, "renamed_file": false
-            }]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1,
-            "head_commit_sha": "bbb222",
-            "base_commit_sha": "aaa111",
-            "start_commit_sha": "aaa111"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Add order processing", "Implements order handler", "alice")
 
 	// Two-turn conversation: first call returns read_file tool call, second returns final_result.
 	var callCount atomic.Int32
@@ -123,31 +99,7 @@ func TestSearchCodebaseToolGracefulDegradation(t *testing.T) {
 		llm.SetEmbeddingResponseFunc(nil)
 	})
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Add order processing",
-            "description": "Implements order handler",
-            "author": {"username": "alice"},
-            "source_branch": "feature/orders",
-            "target_branch": "main",
-            "sha": "bbb222",
-            "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{
-                "old_path": "src/handler.go",
-                "new_path": "src/handler.go",
-                "diff": "@@ -10,6 +10,12 @@ package handler\n import \"fmt\"\n \n+func ProcessOrder(order *Order) error {\n+    result := CalculateTotal(order.Items)\n+    if result == nil {\n+        return nil\n+    }\n+    fmt.Println(result)\n+    return nil\n+}",
-                "new_file": false, "deleted_file": false, "renamed_file": false
-            }]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1,
-            "head_commit_sha": "bbb222",
-            "base_commit_sha": "aaa111",
-            "start_commit_sha": "aaa111"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Add order processing", "Implements order handler", "alice")
 
 	// Two-turn conversation: first call returns search_codebase tool call, second returns final_result.
 	// After the first LLM call (indexing is done by then), break embeddings so search-mcp fails.

@@ -3,9 +3,11 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -16,6 +18,27 @@ var (
 	llm          *LLMMock
 	bareRepoPath string
 )
+
+// Fixtures contains pre-built MRBranchResults for common test scenarios.
+// Multiple tests can share these since dedup is keyed on (repoID, mrIID),
+// not on SHA — each test gets a unique repoID and mrIID from NewTestContext.
+var fixtures struct {
+	// SimpleChange: one-line edit to src/handler.go (adds a comment line).
+	// Good for: basic pipeline tests, dedup, error handling, comment tests.
+	SimpleChange *MRBranchResult
+
+	// NewFile: adds a new file (src/newfeature.go).
+	// Good for: tests that need new_file=true in the diff.
+	NewFile *MRBranchResult
+
+	// MultiFile: edits src/handler.go + src/util.go + adds src/service.go.
+	// Good for: tests that need multiple files in the diff.
+	MultiFile *MRBranchResult
+
+	// LargeDiff: adds a file with 5001 lines.
+	// Good for: TestLargeDiffShortCircuit only.
+	LargeDiff *MRBranchResult
+}
 
 func TestMain(m *testing.M) {
 	// 1. Start mock servers FIRST (before Docker containers need them)
@@ -150,5 +173,87 @@ func Foo(x, y int) int {
 	}
 
 	t.Logf("bare git repo created at %s", bareDir)
+
+	// Create pre-built fixtures for common test scenarios
+	// Wrap bareDir in a *testing.T-like interface for CreateMRBranch
+	t.Logf("creating fixture branches...")
+	fixtures.SimpleChange = CreateMRBranch(t, bareDir, "fixture/simple-change", "main", map[string]string{
+		"src/handler.go": `package handler
+
+import "fmt"
+
+// ProcessOrder handles order processing logic.
+// It validates the order and calculates totals.
+// This function is responsible for the main order workflow.
+func ProcessOrder(order *Order) error {
+	// process order - added comment on feature branch
+	result := CalculateTotal(order.Items)
+	if result == nil {
+		return nil
+	}
+	fmt.Println(result)
+	return nil
+}
+
+// HelperFunction is a placeholder for future functionality.
+func HelperFunction() int {
+	return 42
+}
+`,
+	})
+
+	fixtures.NewFile = CreateMRBranch(t, bareDir, "fixture/new-file", "main", map[string]string{
+		"src/newfeature.go": `package handler
+
+func NewFeature() string {
+	return "hello"
+}
+`,
+	})
+
+	fixtures.MultiFile = CreateMRBranch(t, bareDir, "fixture/multi-file", "main", map[string]string{
+		"src/handler.go": `package handler
+
+import "fmt"
+
+func ProcessOrder(order *Order) error {
+	result := CalculateTotal(order.Items)
+	// added comment
+	if result == nil {
+		return nil
+	}
+	fmt.Println(result)
+	return nil
+}
+`,
+		"src/util.go": `package handler
+
+// CalculateTotal sums all item prices.
+func CalculateTotal(items []Item) *int {
+	total := 0
+	for _, item := range items {
+		total += item.Price
+	}
+	return &total
+}
+`,
+		"src/service.go": `package handler
+
+func ServiceCall() error {
+	return nil
+}
+`,
+	})
+
+	// Large diff: generate 5001-line file
+	var largeBuf strings.Builder
+	largeBuf.WriteString("package large\n\n")
+	for i := 0; i < 5001; i++ {
+		fmt.Fprintf(&largeBuf, "var Line%d = %d\n", i, i)
+	}
+	fixtures.LargeDiff = CreateMRBranch(t, bareDir, "fixture/large-diff", "main", map[string]string{
+		"large/big.go": largeBuf.String(),
+	})
+
 	return bareDir
 }

@@ -5,7 +5,6 @@ package e2e
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -19,30 +18,7 @@ func TestLargeDiffShortCircuit(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	// Generate a diff with 5001 changed lines (each starts with '+')
-	var sb strings.Builder
-	sb.WriteString("@@ -1,0 +1,5001 @@\n")
-	for i := 0; i < 5001; i++ {
-		fmt.Fprintf(&sb, "+line%d\n", i)
-	}
-	largeDiff := sb.String()
-
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "iid": 1, "title": "Huge refactor", "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/large", "target_branch": "main",
-            "sha": "large111", "draft": false
-        }`),
-		Changes: json.RawMessage(fmt.Sprintf(`{
-            "changes": [{"old_path": "big.go", "new_path": "big.go", "diff": %q,
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`, largeDiff)),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "large111",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.LargeDiff, "Huge refactor", "", "alice")
 
 	runID, err := tc.TriggerReview()
 	if err != nil {
@@ -129,24 +105,7 @@ func TestLLMTerminalError(t *testing.T) {
 	t.Parallel()
 	tc := NewTestContext(t)
 
-	tc.SetMR(&MRConfig{
-		Details: json.RawMessage(`{
-            "title": "Add feature",
-            "description": "",
-            "author": {"username": "alice"},
-            "source_branch": "feature/x", "target_branch": "main",
-            "sha": "err111", "draft": false
-        }`),
-		Changes: json.RawMessage(`{
-            "changes": [{"old_path": "x.go", "new_path": "x.go",
-            "diff": "@@ -1,2 +1,3 @@\n package x\n+// new line\n func F() {}",
-            "new_file": false, "deleted_file": false, "renamed_file": false}]
-        }`),
-		Versions: json.RawMessage(`[{
-            "id": 1, "head_commit_sha": "err111",
-            "base_commit_sha": "base000", "start_commit_sha": "base000"
-        }]`),
-	})
+	tc.SetMRFromBranch(fixtures.SimpleChange, "Add feature", "", "alice")
 
 	// Set custom response function via TestContext
 	tc.SetResponseFunc(func(reqBody []byte) (int, json.RawMessage) {

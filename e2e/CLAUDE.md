@@ -48,7 +48,7 @@ docker compose -p e2e build api-server worker
 
 ## Parallel Test Execution
 
-All 29 e2e tests run in parallel using `t.Parallel()`. Test isolation is achieved through:
+All 43 e2e tests run in parallel using `t.Parallel()`. Test isolation is achieved through:
 
 1. **Unique MR IIDs**: Each test gets a unique MR IID via an atomic counter
 2. **TestContext**: Per-test context encapsulating all isolated state
@@ -91,6 +91,79 @@ func TestExample(t *testing.T) {
     notes := tc.Notes()  // Only notes for this test's MR
     discussions := tc.Discussions()  // Only discussions for this test's MR
 }
+```
+
+## Real Git Fixtures
+
+Most tests use real git branches created from the shared bare repo. The fixtures system provides pre-built MR branch data that tests can use:
+
+### Pre-built Fixtures
+
+`e2e_test.go` defines a global `fixtures` struct populated during `TestMain`:
+
+```go
+var fixtures struct {
+    SimpleChange *MRBranchResult  // One-line edit to src/handler.go
+    NewFile      *MRBranchResult  // Adds a new file (src/newfeature.go)
+    MultiFile    *MRBranchResult  // Edits multiple files
+    LargeDiff    *MRBranchResult // 5001-line file (>5000 line limit)
+}
+```
+
+These fixtures are created once when the test suite starts and shared across all tests. Dedup is keyed on `(repoID, mrIID)`, not SHA, so multiple tests can safely use the same fixture.
+
+### Using Fixtures
+
+```go
+func TestExample(t *testing.T) {
+    t.Parallel()
+    tc := NewTestContext(t)
+    
+    // Use a pre-built fixture (zero per-test git operations)
+    tc.SetMRFromBranch(fixtures.SimpleChange, "My PR title", "Description", "alice")
+    
+    // Or create a unique branch for tests needing multi-push scenarios
+    secondBranch := "unique-branch-" + tc.MRIID
+    result := CreateMRBranch(t, bareRepoPath, secondBranch, "main", map[string]string{
+        "src/handler.go": `package handler...`,
+    })
+    tc.SetMRFromBranch(result, "Updated PR", "", "alice")
+}
+```
+
+### When to Use Fixtures vs Per-Test Branches
+
+| Scenario | Use |
+|----------|-----|
+| Single push, basic pipeline tests | `fixtures.SimpleChange` |
+| Tests needing `new_file=true` | `fixtures.NewFile` |
+| Tests needing multiple files | `fixtures.MultiFile` |
+| Large diff (>5000 lines) tests | `fixtures.LargeDiff` |
+| Multi-push tests (re-review, cancel, debounce) | `CreateMRBranch` per test |
+
+### MRBranchResult Fields
+
+```go
+type MRBranchResult struct {
+    BaseSHA      string          // Base commit SHA (target branch HEAD)
+    HeadSHA      string          // Head commit SHA (feature branch HEAD)
+    SourceBranch string          // Feature branch name
+    TargetBranch string          // Base branch name (usually "main")
+    Changes      json.RawMessage // GitLab-format changes JSON
+    Versions     json.RawMessage // GitLab-format versions JSON
+}
+```
+
+### SHA Assertions
+
+Tests asserting SHA values in discussion positions should use the fixture's real SHAs:
+
+```go
+// Before (fake SHAs):
+if d.Position.BaseSHA != "aaa111" { ... }
+
+// After (real SHAs from fixture):
+if d.Position.BaseSHA != fixtures.SimpleChange.BaseSHA { ... }
 ```
 
 ### TestContext Methods
@@ -191,7 +264,7 @@ Each test case should:
 - `llm.Reset()` clears both requests and `ResponseFunc`. Always set `ResponseFunc` **after** the initial `llm.Reset()` call in test setup.
 - Test 9 (`TestDuplicateDiffDedup`) completes in ~2s. The debounce timer only fires for cancelled invocations; after a normal completion it is skipped.
 
-## Current test cases (42 tests)
+## Current test cases (43 tests)
 
 | Test | Description |
 |---|---|
@@ -236,6 +309,7 @@ Each test case should:
 | `TestOrgInstructionsRepoFilter` | Repo filter includes/excludes instructions based on repo ID match. |
 | `TestReadFileReturnsMergeResultContent` | `read_file` returns content from merge result commit (combining source + target changes). |
 | `TestMergeConflictSkipsReview` | MR with merge conflicts → `status=conflicts`, no LLM call. |
+| `TestRealGitPipelineIntegrity` | Acceptance test: verifies real git SHAs in discussion positions and real diff content in LLM requests. |
 | `TestActivityLogLifecycle` | Activity log lifecycle: creates provider/repo/review, lists logs with filters and pagination. |
 
 **Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the debounce (configured via `DEBOUNCE_TIMEOUT=5s` in e2e). They complete in seconds instead of minutes. With parallel execution, the full suite completes in ~5-8 minutes (previously ~30-50 minutes). The suite timeout is 600s.

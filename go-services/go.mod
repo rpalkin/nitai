@@ -9,9 +9,11 @@ replace (
 
 require (
 	ai-reviewer/lib v0.0.0
+	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/go-git/go-git/v5 v5.17.0
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/restatedev/sdk-go v0.23.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -51,5 +53,4 @@ require (
 	golang.org/x/text v0.31.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

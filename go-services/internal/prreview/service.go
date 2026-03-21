@@ -12,8 +12,10 @@ import (
 
 	"ai-reviewer/go-services/internal/db"
 	"ai-reviewer/go-services/internal/difffetcher"
+	"ai-reviewer/go-services/internal/difffilter"
 	"ai-reviewer/go-services/internal/indexing"
 	"ai-reviewer/go-services/internal/postreview"
+	"ai-reviewer/go-services/internal/reporules"
 	"ai-reviewer/go-services/internal/reposyncer"
 )
 
@@ -67,16 +69,17 @@ type RunRequest struct {
 
 // reviewerInput is the payload sent to the Python Reviewer service.
 type reviewerInput struct {
-	Diff             string   `json:"diff"`
-	MRTitle          string   `json:"mr_title"`
-	MRDescription    string   `json:"mr_description"`
-	MRAuthor         string   `json:"mr_author"`
-	SourceBranch     string   `json:"source_branch"`
-	TargetBranch     string   `json:"target_branch"`
-	ChangedFiles     []string `json:"changed_files"`
-	RepoPath         string   `json:"repo_path,omitempty"`
-	TargetBranchSHA  string   `json:"target_branch_sha,omitempty"`
-	SearchCollection string   `json:"search_collection,omitempty"`
+	Diff               string   `json:"diff"`
+	MRTitle            string   `json:"mr_title"`
+	MRDescription      string   `json:"mr_description"`
+	MRAuthor           string   `json:"mr_author"`
+	SourceBranch       string   `json:"source_branch"`
+	TargetBranch       string   `json:"target_branch"`
+	ChangedFiles       []string `json:"changed_files"`
+	RepoPath           string   `json:"repo_path,omitempty"`
+	TargetBranchSHA    string   `json:"target_branch_sha,omitempty"`
+	SearchCollection   string   `json:"search_collection,omitempty"`
+	CustomInstructions []string `json:"custom_instructions,omitempty"`
 }
 
 // reviewComment is a single inline comment from the Reviewer service.
@@ -181,8 +184,47 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		return fail(fmt.Errorf("updating run status: %w", err))
 	}
 
-	// Step 6: Short-circuit if diff is too large to review.
-	if fetchResp.DiffTooLarge {
+	// Step 6: Sync the repository (clone or fetch bare git clone on shared volume).
+	// Moved before DiffTooLarge check so we can read .review-rules.yaml for filtering.
+	syncResult, err := restate.Service[reposyncer.SyncResult](ctx, "RepoSyncer", "SyncRepo").
+		Request(reposyncer.SyncRequest{
+			RepoID:       req.RepoID,
+			TargetBranch: fetchResp.TargetBranch,
+		})
+	if err != nil {
+		return fail(fmt.Errorf("syncing repo: %w", err))
+	}
+
+	// Step 7: Read .review-rules.yaml from bare clone at PR head commit.
+	rules, err := restate.Run(ctx, func(restate.RunContext) (reporules.ReviewRules, error) {
+		return reporules.ReadRepoRules(syncResult.RepoPath, fetchResp.DiffHash, fetchResp.ChangedFiles)
+	})
+	if err != nil {
+		// Non-fatal: log and proceed without rules
+		log.Printf("PRReview: reading repo rules: %v", err)
+		rules = reporules.ReviewRules{}
+	}
+
+	// Step 8: Filter diff by ignore globs.
+	diff := fetchResp.Diff
+	changedFiles := fetchResp.ChangedFiles
+	changedLines := fetchResp.ChangedLines
+	if len(rules.IgnoreGlobs) > 0 {
+		filtered := difffilter.FilterDiff(fetchResp.Diff, fetchResp.ChangedFiles, rules.IgnoreGlobs)
+		if len(filtered.ChangedFiles) == 0 {
+			log.Printf("PRReview: all files ignored by .review-rules.yaml, skipping")
+			if err := db.UpdateReviewRunStatus(ctx, p.pool, runID, "skipped"); err != nil {
+				return "", fmt.Errorf("updating run status to skipped: %w", err)
+			}
+			return runID, nil
+		}
+		diff = filtered.Diff
+		changedFiles = filtered.ChangedFiles
+		changedLines = filtered.ChangedLines
+	}
+
+	// Step 9: Short-circuit if diff is too large to review (evaluated after filtering).
+	if changedLines > 5000 {
 		_, err := restate.Service[postreview.PostResponse](ctx, "PostReview", "Post").
 			Request(postreview.PostRequest{
 				ReviewRunID:  runID,
@@ -201,17 +243,7 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		return runID, nil
 	}
 
-	// Step 7: Sync the repository (clone or fetch bare git clone on shared volume).
-	syncResult, err := restate.Service[reposyncer.SyncResult](ctx, "RepoSyncer", "SyncRepo").
-		Request(reposyncer.SyncRequest{
-			RepoID:       req.RepoID,
-			TargetBranch: fetchResp.TargetBranch,
-		})
-	if err != nil {
-		return fail(fmt.Errorf("syncing repo: %w", err))
-	}
-
-	// Step 8: Index the repository for semantic search (graceful degradation on failure).
+	// Step 10: Index the repository for semantic search (graceful degradation on failure).
 	collectionName := indexing.SanitizeCollectionName(req.RepoID, fetchResp.TargetBranch)
 	lastCommit, storedCollection, found, err := db.GetBranchIndex(ctx, p.pool, req.RepoID, fetchResp.TargetBranch)
 	if err != nil {
@@ -245,25 +277,26 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		}
 	}
 
-	// Step 9: Call the Python Reviewer service (cross-language via Restate).
+	// Step 11: Call the Python Reviewer service (cross-language via Restate).
 	reviewer, err := restate.Service[reviewerOutput](ctx, "Reviewer", "RunReview").
 		Request(reviewerInput{
-			Diff:             fetchResp.Diff,
-			MRTitle:          fetchResp.MRTitle,
-			MRDescription:    fetchResp.MRDescription,
-			MRAuthor:         fetchResp.MRAuthor,
-			SourceBranch:     fetchResp.SourceBranch,
-			TargetBranch:     fetchResp.TargetBranch,
-			ChangedFiles:     fetchResp.ChangedFiles,
-			RepoPath:         syncResult.RepoPath,
-			TargetBranchSHA:  syncResult.HeadSHA,
-			SearchCollection: collectionName,
+			Diff:               diff,
+			MRTitle:            fetchResp.MRTitle,
+			MRDescription:      fetchResp.MRDescription,
+			MRAuthor:           fetchResp.MRAuthor,
+			SourceBranch:       fetchResp.SourceBranch,
+			TargetBranch:       fetchResp.TargetBranch,
+			ChangedFiles:       changedFiles,
+			RepoPath:           syncResult.RepoPath,
+			TargetBranchSHA:    syncResult.HeadSHA,
+			SearchCollection:   collectionName,
+			CustomInstructions: rules.Instructions,
 		})
 	if err != nil {
 		return fail(fmt.Errorf("running reviewer: %w", err))
 	}
 
-	// Step 10: Persist comments to DB before posting (idempotency).
+	// Step 12: Persist comments to DB before posting (idempotency).
 	commentInputs := make([]db.ReviewCommentInput, len(reviewer.Comments))
 	for i, c := range reviewer.Comments {
 		commentInputs[i] = db.ReviewCommentInput{
@@ -277,21 +310,25 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		return fail(fmt.Errorf("inserting review comments: %w", err))
 	}
 
-	// Step 11: Post summary and inline comments to the provider.
+	// Step 13: Post summary and inline comments to the provider (with rules_modified warning if applicable).
+	summary := reviewer.Summary
+	if rules.RulesModified {
+		summary = "⚠️ **This PR modifies `.review-rules.yaml`.** Review rules have been adjusted accordingly.\n\n" + summary
+	}
 	_, err = restate.Service[postreview.PostResponse](ctx, "PostReview", "Post").
 		Request(postreview.PostRequest{
 			ReviewRunID:  runID,
 			RepoID:       req.RepoID,
 			MRNumber:     req.MRNumber,
 			RepoRemoteID: fetchResp.RepoRemoteID,
-			Summary:      reviewer.Summary,
+			Summary:      summary,
 			DryRun:       req.DryRun,
 		})
 	if err != nil {
 		return fail(fmt.Errorf("posting review: %w", err))
 	}
 
-	// Step 12: Mark run as completed.
+	// Step 14: Mark run as completed.
 	if err := db.UpdateReviewRunStatus(ctx, p.pool, runID, "completed"); err != nil {
 		return fail(err)
 	}

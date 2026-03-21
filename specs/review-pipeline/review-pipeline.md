@@ -61,25 +61,32 @@ Submit new invocation:
                                               |
                                               v
                       +---------------------------------------------+
-                      | Call: DiffFetcher.FetchRepoRules             |
-                      |  - resolve .review-rules.yaml from PR head  |
-                      |    (target branch + PR diff applied):       |
-                      |    . if PR modifies .review-rules.yaml ~>    |
-                      |      use the version from the PR head ref   |
-                      |      and set rules_modified=true             |
-                      |    . otherwise ~> use the target branch copy |
-                      |    . fetched via provider API (GetFileContent |
-                      |      at PR head ref), no local clone needed ~|
+                      | Call: RepoSyncer.SyncRepo                   |
+                      |  - clone or fetch bare git repo             |
+                      |  - returns repo_path and head_sha           |
+                      +----------------------+----------------------+
+                                              |
+                                              v
+                      +---------------------------------------------+
+                      | Read: .review-rules.yaml from bare clone     |
+                      |  - read file at PR head commit SHA          |
                       |  - parse ignore globs + custom instructions |
-                      |  - filter diff: remove files matching       |
-                      |    ignore patterns                          |
+                      |  - if file not found ~> silent no-op       |
+                      |  - if modified in PR ~> set rules_modified  |
+                      +----------------------+----------------------+
+                                              |
+                                              v
+                      +---------------------------------------------+
+                      | Filter diff by ignore globs                 |
+                      |  - remove files matching ignore patterns    |
                       |  - if no reviewable files remain ~> skip     |
                       +----------------------+----------------------+
                                               |
                                               v
                       +---------------------------------------------+
-                      | Call: RepoSyncer.SyncRepo                   |
-                      |  - pull latest target branch to local clone |
+                      | Diff too large after filtering?              |
+                      |  - if filtered changed lines > 5000         |
+                      |    ~> post "too large" comment and exit      |
                       +----------------------+----------------------+
                                               |
                                               v
@@ -109,10 +116,9 @@ Submit new invocation:
                       +---------------------------------------------+
                       | Call: PostReview.Post                        |
                       |  - if dry_run ~> store results, skip posting |
-                      |  - if rules_modified ~> post warning comment:|
-                      |    "This PR modifies .review-rules.yaml.    |
-                      |     Review rules have been adjusted          |
-                      |     accordingly."                            |
+                      |  - if rules_modified ~> prepend warning to  |
+                      |    summary: "This PR modifies               |
+                      |    .review-rules.yaml..."                   |
                       |  - post summary comment (first review only; |
                       |    on re-reviews the original stays as-is)  |
                       |  - post new inline comments via provider API |
@@ -166,8 +172,8 @@ Instructions come from **two sources**, merged at review time:
 
 ### Repository-Level Rules (`.review-rules.yaml`)
 - Developers can commit a `.review-rules.yaml` file to the repository root
-- This file is read from the **PR head ref** (i.e., the result of target branch + PR changes) during the `FetchRepoRules` handler. This means a PR that adds or modifies `.review-rules.yaml` will be reviewed using the updated rules — the author's intent is respected immediately.
-- Fetched via the provider API (`GetFileContent` at the PR head commit SHA), so it does not depend on the local repo clone being synced yet
+- This file is read from the **bare git clone** at the PR head commit SHA during the review pipeline, after RepoSyncer.SyncRepo completes. Reading directly from the local clone avoids an extra provider API call.
+- If the PR modifies `.review-rules.yaml`, the `rules_modified` flag is set, which adds a warning to the posted summary.
 - Format:
 
 ```yaml

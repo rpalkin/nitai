@@ -14,6 +14,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -668,4 +671,99 @@ func parseInt64(s string) (int64, error) {
 	var result int64
 	_, err := fmt.Sscanf(s, "%d", &result)
 	return result, err
+}
+
+// CommitFileToBareRepo commits a file to the bare git repo on a specified branch.
+// It creates the branch if it doesn't exist. Returns the commit SHA.
+// This is used by rules tests to add .review-rules.yaml files.
+func CommitFileToBareRepo(t *testing.T, barePath, branch, filePath string, content []byte) string {
+	t.Helper()
+
+	// Use git commands to add a commit to the bare repo
+	// 1. Clone bare to a temp working directory
+	// 2. Create/update file
+	// 3. Commit on the branch
+	// 4. Push back to bare
+	// 5. Return SHA
+
+	workDir, err := os.MkdirTemp("", "e2e-commit-work-*")
+	if err != nil {
+		t.Fatalf("CommitFileToBareRepo: temp dir: %v", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	// Clone from bare to working directory
+	cloneCmd := exec.Command("git", "clone", "--branch", branch, barePath, workDir)
+	cloneCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	if err := cloneCmd.Run(); err != nil {
+		// Branch might not exist - try cloning without branch specification and create it
+		cloneCmd = exec.Command("git", "clone", barePath, workDir)
+		cloneCmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cloneCmd.CombinedOutput(); err != nil {
+			t.Fatalf("git clone: %v\n%s", err, out)
+		}
+
+		// Create and checkout the branch
+		checkoutCmd := exec.Command("git", "checkout", "-b", branch)
+		checkoutCmd.Dir = workDir
+		if out, err := checkoutCmd.CombinedOutput(); err != nil {
+			t.Fatalf("git checkout -b %s: %v\n%s", branch, err, out)
+		}
+	}
+
+	// Write the file
+	absPath := filepath.Join(workDir, filePath)
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(absPath, content, 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Add and commit
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit("add", filePath)
+	runGit("commit", "-m", "add "+filePath)
+	runGit("push", "origin", branch)
+
+	// Get the SHA
+	revParseCmd := exec.Command("git", "rev-parse", "HEAD")
+	revParseCmd.Dir = workDir
+	shaBytes, err := revParseCmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+	sha := strings.TrimSpace(string(shaBytes))
+
+	// Update the bare repo's server-info
+	updateCmd := exec.Command("git", "--git-dir="+barePath, "update-server-info")
+	if out, err := updateCmd.CombinedOutput(); err != nil {
+		t.Logf("warning: update-server-info: %v\n%s", err, out)
+	}
+
+	t.Logf("CommitFileToBareRepo: committed %s on branch %s at SHA %s", filePath, branch, sha)
+	return sha
 }

@@ -32,7 +32,7 @@ for. Do not search unnecessarily.
 def build_user_prompt(req: ReviewRequest) -> str:
     changed = ", ".join(req.changed_files) if req.changed_files else "(none)"
     description = req.mr_description.strip() if req.mr_description else "(no description)"
-    return (
+    prompt = (
         f"## Merge Request\n"
         f"**Title:** {req.mr_title}\n"
         f"**Author:** {req.mr_author}\n"
@@ -42,3 +42,9 @@ def build_user_prompt(req: ReviewRequest) -> str:
         f"## Diff\n"
         f"```diff\n{req.diff}\n```"
     )
+
+    if req.custom_instructions:
+        instructions_text = "\n".join(f"- {i}" for i in req.custom_instructions)
+        prompt += f"\n\n## Additional Review Instructions\n{instructions_text}"
+
+    return prompt

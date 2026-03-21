@@ -3,24 +3,6 @@
   "permission": {
     "external_directory": {
       "../tasks/**": "allow"
-    },
-    "allow": {
-      "Bash(task show:*)": true,
-      "Bash(task update:*)": true,
-      "Bash(task log-show:*)": true,
-      "Bash(task log:*)": true,
-      "Bash(task list:*)": true,
-      "Bash(go vet:*)": true,
-      "Bash(go test:*)": true,
-      "Bash(go build:*)": true,
-      "Bash(cd:*)": true,
-      "Bash(git status:*)": true,
-      "Bash(git diff:*)": true,
-      "Bash(git log:*)": true,
-      "Bash(git add:*)": true,
-      "Bash(git commit:*)": true,
-      "Bash(git push:*)": true,
-      "Bash(gh pr create:*)": true
     }
   }
 }

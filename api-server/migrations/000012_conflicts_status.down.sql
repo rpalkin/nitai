@@ -1,0 +1,3 @@
+-- PostgreSQL does not support removing values from ENUM types.
+-- The 'conflicts' value will remain in the type but will not be used.
+-- This is acceptable for the rollback scenario.

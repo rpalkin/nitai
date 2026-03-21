@@ -29,7 +29,7 @@ async def run_review(ctx: restate.Context, req: ReviewRequest) -> ReviewResponse
     
     deps = ReviewDeps(
         repo_path=req.repo_path,
-        target_branch_sha=req.target_branch_sha,
+        merge_sha=req.merge_sha,
         search_collection=req.search_collection,
     )
 

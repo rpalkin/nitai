@@ -27,6 +27,7 @@ async def index_repo_handler(ctx: restate.Context, req: IndexRequest) -> IndexRe
             qdrant_url=qdrant_url,
             model=model,
             api_key=api_key,
+            base_collection_name=req.base_collection_name,
         )
     except Exception as e:
         raise restate.TerminalError(f"indexing failed: {e}") from e

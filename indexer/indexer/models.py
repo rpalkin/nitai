@@ -8,6 +8,7 @@ class IndexRequest(BaseModel):
     head_sha: str
     collection_name: str              # sanitized, e.g. <repo_id>_<branch>
     last_indexed_commit: str | None   # from branch_indexes, None = full index
+    base_collection_name: str | None = None  # clone from this collection if target doesn't exist
 
 
 class IndexResult(BaseModel):

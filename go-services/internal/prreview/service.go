@@ -15,6 +15,7 @@ import (
 	"ai-reviewer/go-services/internal/difffilter"
 	"ai-reviewer/go-services/internal/indexing"
 	"ai-reviewer/go-services/internal/instructions"
+	"ai-reviewer/go-services/internal/localmerge"
 	"ai-reviewer/go-services/internal/postreview"
 	"ai-reviewer/go-services/internal/reporules"
 	"ai-reviewer/go-services/internal/reposyncer"
@@ -78,7 +79,7 @@ type reviewerInput struct {
 	TargetBranch       string   `json:"target_branch"`
 	ChangedFiles       []string `json:"changed_files"`
 	RepoPath           string   `json:"repo_path,omitempty"`
-	TargetBranchSHA    string   `json:"target_branch_sha,omitempty"`
+	MergeSHA           string   `json:"merge_sha,omitempty"`
 	SearchCollection   string   `json:"search_collection,omitempty"`
 	CustomInstructions []string `json:"custom_instructions,omitempty"`
 }
@@ -196,9 +197,34 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		return fail(fmt.Errorf("syncing repo: %w", err))
 	}
 
-	// Step 7: Read .review-rules.yaml from bare clone at PR head commit.
+	// Step 6b: Compute local merge of source into target.
+	// This produces the exact post-merge state for read_file and search indexing.
+	// Falls back to source SHA if merge computation fails (e.g., SHA not in clone).
+	mergeResult, err := restate.Run(ctx, func(restate.RunContext) (localmerge.Result, error) {
+		res, mergeErr := localmerge.CreateMergeCommit(syncResult.RepoPath, syncResult.HeadSHA, fetchResp.DiffHash)
+		if mergeErr != nil {
+			return res, restate.TerminalError(mergeErr, 500)
+		}
+		return res, nil
+	})
+	if err != nil {
+		log.Printf("PRReview: local merge failed, falling back to source SHA: %v", err)
+	}
+	if mergeResult.HasConflicts {
+		log.Printf("PRReview: MR %d has merge conflicts, skipping", req.MRNumber)
+		if err := db.UpdateReviewRunStatus(ctx, p.pool, runID, "conflicts"); err != nil {
+			return "", fmt.Errorf("updating run status to conflicts: %w", err)
+		}
+		return runID, nil
+	}
+	toolsSHA := mergeResult.MergeSHA
+	if toolsSHA == "" {
+		toolsSHA = fetchResp.DiffHash // fallback: use source branch HEAD
+	}
+
+	// Step 7: Read .review-rules.yaml from bare clone at merge result commit.
 	rules, err := restate.Run(ctx, func(restate.RunContext) (reporules.ReviewRules, error) {
-		return reporules.ReadRepoRules(syncResult.RepoPath, fetchResp.DiffHash, fetchResp.ChangedFiles)
+		return reporules.ReadRepoRules(syncResult.RepoPath, toolsSHA, fetchResp.ChangedFiles)
 	})
 	if err != nil {
 		// Non-fatal: log and proceed without rules
@@ -287,6 +313,28 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 		}
 	}
 
+	// Step 10b: Index merge result (clone target collection + incremental update).
+	// Use source branch name for collection (one per PR branch, reused on re-push).
+	mergeCollectionName := indexing.SanitizeCollectionName(req.RepoID, fetchResp.SourceBranch)
+	if collectionName != "" {
+		targetSHA := syncResult.HeadSHA
+		mergeIdxResult, mergeErr := restate.Service[indexing.IndexResult](ctx, "Indexer", "IndexRepo").
+			Request(indexing.IndexRequest{
+				RepoID:             req.RepoID,
+				RepoPath:           syncResult.RepoPath,
+				Branch:             fetchResp.SourceBranch,
+				HeadSHA:            toolsSHA,
+				CollectionName:     mergeCollectionName,
+				LastIndexedCommit:  &targetSHA,
+				BaseCollectionName: collectionName,
+			})
+		if mergeErr != nil {
+			log.Printf("PRReview: merge-result indexing failed, falling back to target collection: %v", mergeErr)
+		} else {
+			collectionName = mergeIdxResult.CollectionName
+		}
+	}
+
 	// Step 11: Call the Python Reviewer service (cross-language via Restate).
 	// Resolve org instructions using the filtered changed files, then merge with YAML instructions.
 	mergedInstructions := instructions.Merge(
@@ -303,7 +351,7 @@ func (p *PRReview) Run(ctx restate.ObjectContext, req RunRequest) (runResult str
 			TargetBranch:       fetchResp.TargetBranch,
 			ChangedFiles:       changedFiles,
 			RepoPath:           syncResult.RepoPath,
-			TargetBranchSHA:    syncResult.HeadSHA,
+			MergeSHA:           toolsSHA,
 			SearchCollection:   collectionName,
 			CustomInstructions: mergedInstructions,
 		})

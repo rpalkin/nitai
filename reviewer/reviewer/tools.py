@@ -17,7 +17,7 @@ MAX_SEARCH_RESPONSE_SIZE = 100 * 1024  # 100KB
 @dataclass
 class ReviewDeps:
     repo_path: str | None
-    target_branch_sha: str | None
+    merge_sha: str | None
     search_collection: str | None = None
     _file_cache: dict[str, str] | None = None
 

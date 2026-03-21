@@ -17,6 +17,7 @@ The indexing subsystem maintains searchable vector embeddings of repository code
 **Purpose:** Walks the local repo clone, chunks code with tree-sitter, computes embeddings, upserts to Qdrant
 **Collection naming:** `<repo-id>-<branch>` — one collection per repo per target branch
 **Branch collection optimization:** When a PR targets a non-primary branch and no Qdrant collection exists for that branch yet, the indexer **clones the primary branch's collection** first, then re-indexes only the files that differ between the two branches. This avoids a full re-embedding for branches that share most of their code with main/master.
+**Merge-result indexing:** For PR reviews, the indexer creates a **merge-result collection** named `<repo_id>_<source_branch>`. It clones the target branch collection and incrementally updates it with changes from the local merge commit. This ensures search results reflect the exact post-merge state of the PR. If merge-result indexing fails, the review gracefully falls back to using the target branch collection.
 
 ### Qdrant
 

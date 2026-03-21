@@ -44,6 +44,8 @@ func stringToReviewStatus(s string) apiv1.ReviewStatus {
 		return apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED
 	case "failed":
 		return apiv1.ReviewStatus_REVIEW_STATUS_FAILED
+	case "conflicts":
+		return apiv1.ReviewStatus_REVIEW_STATUS_CONFLICTS
 	default:
 		return apiv1.ReviewStatus_REVIEW_STATUS_UNSPECIFIED
 	}

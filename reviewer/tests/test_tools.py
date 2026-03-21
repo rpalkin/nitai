@@ -257,17 +257,17 @@ class TestSearchMcp:
 
 class TestReviewDeps:
     def test_both_none(self):
-        deps = ReviewDeps(repo_path=None, target_branch_sha=None)
+        deps = ReviewDeps(repo_path=None, merge_sha=None)
         assert deps.repo_path is None
-        assert deps.target_branch_sha is None
+        assert deps.merge_sha is None
         assert deps.search_collection is None
 
     def test_both_set(self):
-        deps = ReviewDeps(repo_path="/repo.git", target_branch_sha=VALID_SHA)
+        deps = ReviewDeps(repo_path="/repo.git", merge_sha=VALID_SHA)
         assert deps.repo_path == "/repo.git"
-        assert deps.target_branch_sha == VALID_SHA
+        assert deps.merge_sha == VALID_SHA
         assert deps.search_collection is None
 
     def test_with_search_collection(self):
-        deps = ReviewDeps(repo_path="/repo.git", target_branch_sha=VALID_SHA, search_collection="my-repo")
+        deps = ReviewDeps(repo_path="/repo.git", merge_sha=VALID_SHA, search_collection="my-repo")
         assert deps.search_collection == "my-repo"

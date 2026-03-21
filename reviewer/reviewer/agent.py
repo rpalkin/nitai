@@ -35,9 +35,9 @@ review_agent: Agent[ReviewDeps, ReviewResponse] = Agent(
 
 @review_agent.tool
 async def read_file(ctx: RunContext[ReviewDeps], file_path: str) -> str:
-    """Read a file from the repository at the target branch HEAD."""
+    """Read a file from the repository at the merge result commit."""
     logger.debug(f"read_file called: file_path={file_path}")
-    if not ctx.deps.repo_path or not ctx.deps.target_branch_sha:
+    if not ctx.deps.repo_path or not ctx.deps.merge_sha:
         logger.warning("read_file: no repo context available")
         return "Error: repository context not available for this review"
 
@@ -47,7 +47,7 @@ async def read_file(ctx: RunContext[ReviewDeps], file_path: str) -> str:
         return ctx.deps._file_cache[file_path]
 
     result = await asyncio.to_thread(
-        read_file_from_repo, ctx.deps.repo_path, ctx.deps.target_branch_sha, file_path
+        read_file_from_repo, ctx.deps.repo_path, ctx.deps.merge_sha, file_path
     )
 
     # Cache the result if it's valid content (not an error)

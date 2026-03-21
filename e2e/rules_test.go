@@ -284,10 +284,6 @@ func TestReviewRulesMissingFile(t *testing.T) {
 	if !strings.Contains(body, "feature.go") {
 		t.Errorf("LLM request should contain the change file")
 	}
-	// No instructions should be present
-	if strings.Contains(body, "Additional Review Instructions") {
-		t.Errorf("LLM request should NOT contain instructions section when rules file missing")
-	}
 
 	t.Logf("TestReviewRulesMissingFile passed: review completed normally without rules")
 }

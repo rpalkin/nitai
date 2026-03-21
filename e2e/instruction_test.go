@@ -12,7 +12,9 @@ import (
 )
 
 func TestInstructionCRUDAndResolve(t *testing.T) {
-	t.Parallel()
+	// NOTE: This test cannot run in parallel because it lists ALL instructions
+	// in the system and expects a specific count. Other tests create org-level
+	// instructions that would interfere with the assertions here.
 
 	// Create 3 instructions
 	_, err := clients.Instruction.CreateInstruction(context.Background(),

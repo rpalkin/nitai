@@ -77,6 +77,15 @@ Submit new invocation:
                                               |
                                               v
                       +---------------------------------------------+
+                      | Resolve: org-level instructions from DB     |
+                      |  - query review_instructions for org         |
+                      |  - filter by repo_filter + file_pattern     |
+                      |  - non-fatal: on error, proceed with        |
+                      |    YAML instructions only                   |
+                      +----------------------+----------------------+
+                                              |
+                                              v
+                      +---------------------------------------------+
                       | Filter diff by ignore globs                 |
                       |  - remove files matching ignore patterns    |
                       |  - if no reviewable files remain ~> skip     |
@@ -107,7 +116,10 @@ Submit new invocation:
                       |  - invoke Pydantic AI agent with:           |
                       |    . filtered PR diff                       |
                       |    . previous comments (if any)             |
-                      |    . custom instructions (DB + repo rules)  |
+                      |    . custom instructions:                   |
+                      |      - org-level (from DB, filtered by     |
+                      |        repo + file pattern)                 |
+                      |      - repo-level (from .review-rules.yaml)|
                       |    . MCP tools: search + file reader        |
                       |  - returns structured review output         |
                       +----------------------+----------------------+
@@ -169,6 +181,12 @@ Instructions come from **two sources**, merged at review time:
   - `enabled` flag — disabled instructions are excluded from resolution
 - At review time, `ResolveInstructions` RPC returns applicable instructions based on the PR's repo and changed files (AND logic: both repo and file filters must match if set; empty filter = match all)
 - Language filtering is handled on the frontend by mapping languages to file pattern globs
+
+### Pipeline Integration
+- The `PRReview.Run` handler resolves org-level instructions via a direct DB query (`ResolveInstructionsForRepo` in `go-services/internal/db/queries.go`)
+- Resolution uses the **filtered** changed files list (after `.review-rules.yaml` ignore globs are applied) to match against `file_pattern_filter`
+- Org-level instructions are fetched after `SyncRepo` completes (Step 7b in the pipeline) and resolved after diff filtering (Step 11)
+- The merged instructions list (org instructions first, then repo-level instructions) is passed to the Reviewer service as `custom_instructions`
 
 ### Repository-Level Rules (`.review-rules.yaml`)
 - Developers can commit a `.review-rules.yaml` file to the repository root

@@ -160,7 +160,8 @@ func TestNew(t *testing.T) {
 | `e2e_test.go` | `TestMain` + test cases (build tag: `e2e`) |
 | `mock_gitlab.go` | httptest-based mock GitLab API — configurable per-MR responses, thread-safe request recording |
 | `mock_llm.go` | Mock OpenAI-compatible LLM server — returns tool-calling format responses |
-| `helpers.go` | `TestClients` (ConnectRPC), `PollReviewRun`, `SetupProviderAndRepo`, `StartStack`/`StopStack`, `QueryReviewRuns`/`WaitForReviewRun` (direct DB) |
+| `helpers.go` | `TestClients` (ConnectRPC), `PollReviewRun`, `SetupProviderAndRepo`, `StartStack`/`StopStack`, `QueryReviewRuns`/`WaitForReviewRun` (direct DB), `CommitFileToBareRepo` (add files to bare git repo for rules tests) |
+| `rules_test.go` | `.review-rules.yaml` tests: ignore filters, instructions, modified warning, missing file, all-files-ignored |
 | `docker-compose.e2e.yml` | Overlay: sets `OPENROUTER_BASE_URL` + `extra_hosts` to reach mock servers from containers |
 
 ## Adding test cases
@@ -188,7 +189,7 @@ Each test case should:
 - `llm.Reset()` clears both requests and `ResponseFunc`. Always set `ResponseFunc` **after** the initial `llm.Reset()` call in test setup.
 - Test 9 (`TestDuplicateDiffDedup`) completes in ~2s. The debounce timer only fires for cancelled invocations; after a normal completion it is skipped.
 
-## Current test cases (30 tests)
+## Current test cases (35 tests)
 
 | Test | Description |
 |---|---|
@@ -222,5 +223,10 @@ Each test case should:
 | `TestSingleRunPerWebhookReview` | Webhook-triggered review creates exactly ONE run with invocation ID set (regression test). |
 | `TestMalformedWebhookBody` | Invalid JSON body → 4xx or 200, no review run (spec M). |
 | `TestManyInlineComments` | 50 inline comments all posted to GitLab (spec N). |
+| `TestReviewRulesIgnoreFilters` | `.review-rules.yaml` ignore globs exclude files from diff before LLM sees them. |
+| `TestReviewRulesInstructions` | Custom instructions from `.review-rules.yaml` are passed to LLM prompt. |
+| `TestReviewRulesModifiedWarning` | Warning posted in summary when PR modifies `.review-rules.yaml`. |
+| `TestReviewRulesMissingFile` | Missing `.review-rules.yaml` is a silent no-op — review completes normally. |
+| `TestReviewRulesAllFilesIgnored` | All files matching ignore globs → review marked `skipped`, no LLM call. |
 
 **Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the debounce (configured via `DEBOUNCE_TIMEOUT=5s` in e2e). They complete in seconds instead of minutes. With parallel execution, the full suite completes in ~5-8 minutes (previously ~30-50 minutes). The suite timeout is 600s.

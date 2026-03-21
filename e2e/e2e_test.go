@@ -10,10 +10,11 @@ import (
 )
 
 var (
-	stack   *E2EStack
-	clients *TestClients
-	gitlab  *GitLabMock
-	llm     *LLMMock
+	stack        *E2EStack
+	clients      *TestClients
+	gitlab       *GitLabMock
+	llm          *LLMMock
+	bareRepoPath string
 )
 
 func TestMain(m *testing.M) {
@@ -29,9 +30,9 @@ func TestMain(m *testing.M) {
 	// 3. Create a bare git repo served via dumb HTTP for RepoSyncer tests.
 	//    The repo has test files with known content used by tool integration tests.
 	t0 := &testMainT{}
-	gitRepoDir := setupBareGitRepo(t0)
-	defer os.RemoveAll(gitRepoDir)
-	gitlab.SetGitRepoPath(gitRepoDir)
+	bareRepoPath = setupBareGitRepo(t0)
+	defer os.RemoveAll(bareRepoPath)
+	gitlab.SetGitRepoPath(bareRepoPath)
 
 	// 4. Start Docker Compose stack
 	stack = StartStack(t0, gitlab, llm)

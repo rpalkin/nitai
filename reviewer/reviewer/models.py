@@ -12,6 +12,7 @@ class ReviewRequest(BaseModel):
     repo_path: str | None = None
     target_branch_sha: str | None = None
     search_collection: str | None = None
+    custom_instructions: list[str] | None = None
 
 
 class ReviewComment(BaseModel):

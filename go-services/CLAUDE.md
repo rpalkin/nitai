@@ -53,11 +53,13 @@ docker compose up worker
 
 - **`config/`** — env var loading
 - **`db/`** — pgx pool wrapper + hand-written query functions in `queries.go` (includes `GetBranchIndex`, `UpsertBranchIndex` for indexer state tracking)
+- **`difffilter/`** — `FilterDiff` utility. Removes files matching ignore globs from unified diff strings and changed file lists. Uses `doublestar` for `**` recursive glob support.
 - **`difffetcher/`** — `DiffFetcher` Restate service. Decrypts provider token, fetches MR details + diff via GitLab client. Also handles diff-hash dedup (compares HeadSHA against latest completed review).
 - **`postreview/`** — `PostReview` Restate service. Posts summary + inline comments, updates DB with `provider_comment_id`.
 - **`indexing/`** — shared types for indexer integration: `IndexRequest`, `IndexResult`, `SanitizeCollectionName`. Imported by both `prreview` and `indexmainbranch`.
 - **`indexmainbranch/`** — `IndexMainBranch` Virtual Object. Background indexing loop for the primary branch. Keyed by `<repo_id>`. Syncs repo → indexes → self-schedules every 6h via `restate.ObjectSend` with delay. Triggered by `EnableReview`. Stops if `review_enabled` is false.
-- **`prreview/`** — `PRReview` Virtual Object. Full Phase 2 orchestrator: smart debounce → DiffFetcher (details + dedup) → draft guard → RepoSyncer → Indexer (Python, cross-language) → Reviewer (Python, cross-language, with `repo_path`, `target_branch_sha`, `search_collection`) → PostReview. Uses Virtual Object state for debounce timing (`last_started_at`, `last_completed_at`).
+- **`prreview/`** — `PRReview` Virtual Object. Full orchestrator: smart debounce → DiffFetcher (details + dedup) → draft guard → RepoSyncer → read `.review-rules.yaml` → filter diff by ignore globs → DiffTooLarge check → Indexer (Python, cross-language) → Reviewer (Python, cross-language, with `repo_path`, `target_branch_sha`, `search_collection`, `custom_instructions`) → PostReview (with `rules_modified` warning). Uses Virtual Object state for debounce timing (`last_started_at`, `last_completed_at`).
+- **`reporules/`** — `ReadRepoRules` utility. Reads and parses `.review-rules.yaml` from a bare git clone at a given commit SHA via go-git. Returns ignore globs, custom instructions, and whether the rules file was modified in the PR.
 - **`reposyncer/`** — `RepoSyncer` Restate service. Maintains bare git clones via `go-git` (pure Go, no shell-out). Handles clone, fetch, and remote URL updates. Returns `head_sha` for the target branch.
 
 ### External Dependencies
@@ -80,5 +82,7 @@ docker compose up worker
 - **Review statuses** — `review_status` enum: `pending`, `running`, `completed`, `failed`, `skipped` (dedup match), `draft` (MR is a draft)
 - **RepoSyncer uses go-git** — pure Go git implementation (`github.com/go-git/go-git/v5`), no shell-out, no `gc.auto` concern. Auth via `http.BasicAuth` (not embedded in URL). Bare clones stored at `/data/repos/<repo_id>/`.
 - **RepoSyncer is a plain Service** (not Virtual Object) — stateless, concurrent calls for the same repo are safe (go-git clone is atomic, fetch is read-safe).
-- **PRReview.Run v2 pipeline** — debounce → fetch → dedup → draft guard → SyncRepo → IndexRepo → Reviewer (with `repo_path`, `target_branch_sha`, `search_collection`) → PostReview. SyncRepo failure is fatal; IndexRepo failure is non-fatal (review proceeds without search).
+- **PRReview.Run pipeline** — debounce → fetch → dedup → draft guard → SyncRepo → read `.review-rules.yaml` → filter diff → DiffTooLarge check → IndexRepo → Reviewer (with `repo_path`, `target_branch_sha`, `search_collection`, `custom_instructions`) → PostReview (with `rules_modified` warning). SyncRepo failure is fatal; IndexRepo failure is non-fatal (review proceeds without search). Rules reading failure is non-fatal (proceeds without rules).
+- **DiffTooLarge after filtering** — the 5000-line check is evaluated after applying ignore globs from `.review-rules.yaml`, so PRs with many vendor/generated files can still be reviewed if the filtered diff is under the limit.
+- **`.review-rules.yaml` from bare clone** — read via go-git from the local bare clone at the PR head commit SHA. No extra provider API call needed. If the file doesn't exist or the SHA isn't in the clone, it's a silent no-op.
 - **Branch index tracking** — `branch_indexes` table tracks `last_indexed_commit` per repo+branch. If already at `head_sha`, the `Indexer.IndexRepo` call is skipped entirely.

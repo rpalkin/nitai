@@ -48,9 +48,9 @@ pytest tests/test_tools.py -k test_read_file_success
   - `read_file(ctx, file_path)` — reads file from bare clone via `git --git-dir show <sha>:<path>`. Validates SHA (hex), file path (no `..` traversal). 500KB size limit + binary detection. `repo_path` and `sha` injected from `ctx.deps` (ReviewDeps).
   - `search_codebase(ctx, query)` — semantic search via search-MCP. Uses `fastmcp.Client` over HTTP to call the search-MCP container. Collection name from `ctx.deps.search_collection`.
   - `ReviewDeps` dataclass — holds `repo_path`, `target_branch_sha`, `search_collection`. All optional; tools degrade gracefully when fields are empty.
-- **`prompt.py`** — `build_user_prompt(req)` — constructs the user prompt from MR metadata (title, description, author, branches, changed files) + full diff.
+- **`prompt.py`** — `build_user_prompt(req)` — constructs the user prompt from MR metadata (title, description, author, branches, changed files) + full diff. Appends custom instructions (from `.review-rules.yaml`) as an "Additional Review Instructions" section when present.
 - **`models.py`** — Pydantic models:
-  - `ReviewRequest` — diff, mr_title, mr_description, mr_author, source_branch, target_branch, changed_files, repo_path (optional), target_branch_sha (optional), search_collection (optional)
+  - `ReviewRequest` — diff, mr_title, mr_description, mr_author, source_branch, target_branch, changed_files, repo_path (optional), target_branch_sha (optional), search_collection (optional), custom_instructions (optional)
   - `ReviewResponse` — summary (str), comments (list of `ReviewComment`)
   - `ReviewComment` — file_path, line_start, line_end, body (supports multi-line ranges)
 - **`tests/test_tools.py`** — 29 unit tests covering `_validate_sha`, `_validate_file_path`, `read_file_from_repo`, `search_mcp`, `ReviewDeps`

@@ -3,6 +3,19 @@
   "permission": {
     "external_directory": {
       "../tasks/**": "allow"
+    },
+    "bash": {
+      "task *": "allow",
+      "go vet *": "allow",
+      "go test *": "allow",
+      "go build *": "allow",
+      "git status *": "allow",
+      "git diff *": "allow",
+      "git log *": "allow",
+      "git add *": "allow",
+      "git commit *": "allow",
+      "git push *": "allow",
+      "gh pr create *": "allow"
     }
   }
 }

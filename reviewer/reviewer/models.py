@@ -10,7 +10,7 @@ class ReviewRequest(BaseModel):
     target_branch: str
     changed_files: list[str]
     repo_path: str | None = None
-    target_branch_sha: str | None = None
+    merge_sha: str | None = None
     search_collection: str | None = None
     custom_instructions: list[str] | None = None
 

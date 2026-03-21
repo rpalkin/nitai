@@ -5,12 +5,13 @@ import "strings"
 
 // IndexRequest is the payload sent to the Python Indexer service.
 type IndexRequest struct {
-	RepoID            string  `json:"repo_id"`
-	RepoPath          string  `json:"repo_path"`
-	Branch            string  `json:"branch"`
-	HeadSHA           string  `json:"head_sha"`
-	CollectionName    string  `json:"collection_name"`
-	LastIndexedCommit *string `json:"last_indexed_commit"`
+	RepoID             string  `json:"repo_id"`
+	RepoPath           string  `json:"repo_path"`
+	Branch             string  `json:"branch"`
+	HeadSHA            string  `json:"head_sha"`
+	CollectionName     string  `json:"collection_name"`
+	LastIndexedCommit  *string `json:"last_indexed_commit"`
+	BaseCollectionName string  `json:"base_collection_name,omitempty"`
 }
 
 // IndexResult is the response from the Python Indexer service.

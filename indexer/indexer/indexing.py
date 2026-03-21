@@ -42,6 +42,55 @@ def _fetch_existing_hashes(qdrant_client: QdrantClient, collection_name: str) ->
     return hashes
 
 
+def _clone_collection(
+    qdrant_client: QdrantClient,
+    source_name: str,
+    target_name: str,
+) -> None:
+    """Copy all points from source collection to target collection.
+
+    Creates the target collection with the same config as the source.
+    Uses scroll + batch upsert for efficiency.
+    """
+    from qdrant_client.http.models import PointStruct
+
+    source_info = qdrant_client.get_collection(source_name)
+    vectors_config = source_info.config.params.vectors
+
+    qdrant_client.create_collection(
+        collection_name=target_name,
+        vectors_config=vectors_config,
+    )
+
+    offset = None
+    while True:
+        points, next_offset = qdrant_client.scroll(
+            collection_name=source_name,
+            limit=100,
+            offset=offset,
+            with_payload=True,
+            with_vectors=True,
+        )
+        if points:
+            point_structs = []
+            for p in points:
+                if p.vector is None:
+                    continue
+                point_structs.append(PointStruct(
+                    id=p.id,
+                    vector=p.vector,  # type: ignore[arg-type]
+                    payload=p.payload,
+                ))
+            if point_structs:
+                qdrant_client.upsert(
+                    collection_name=target_name,
+                    points=point_structs,
+                )
+        if next_offset is None:
+            break
+        offset = next_offset
+
+
 def index_repo(
     repo_path: str,
     sha: str,
@@ -50,6 +99,7 @@ def index_repo(
     qdrant_url: str,
     model: str,
     api_key: str,
+    base_collection_name: str | None = None,
 ) -> IndexResult:
     """Index a branch from a bare clone into Qdrant.
 
@@ -83,6 +133,12 @@ def index_repo(
 
     qdrant_client = QdrantClient(url=qdrant_url)
     existing_collections = [c.name for c in qdrant_client.get_collections().collections]
+
+    # If base_collection_name is set and target doesn't exist, clone from base
+    if base_collection_name and collection_name not in existing_collections:
+        if base_collection_name in existing_collections:
+            _clone_collection(qdrant_client, base_collection_name, collection_name)
+            existing_collections = [c.name for c in qdrant_client.get_collections().collections]
 
     vector_store = QdrantVectorStore(
         client=qdrant_client,

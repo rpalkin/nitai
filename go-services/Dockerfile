@@ -13,8 +13,10 @@ WORKDIR /workspace/go-services
 
 RUN go build -mod=vendor -o /worker ./cmd/worker
 
-# Runtime stage
-FROM gcr.io/distroless/static-debian12
+# Runtime stage — needs git for localmerge (git merge-tree, git commit-tree)
+FROM alpine:3.21
+
+RUN apk add --no-cache git
 
 COPY --from=builder /worker /worker
 

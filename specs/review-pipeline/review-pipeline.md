@@ -60,20 +60,30 @@ Submit new invocation:
 +------------------+  +----------------------+----------------------+
                                               |
                                               v
-                      +---------------------------------------------+
-                      | Call: RepoSyncer.SyncRepo                   |
-                      |  - clone or fetch bare git repo             |
-                      |  - returns repo_path and head_sha           |
-                      +----------------------+----------------------+
-                                              |
-                                              v
-                      +---------------------------------------------+
-                      | Read: .review-rules.yaml from bare clone     |
-                      |  - read file at PR head commit SHA          |
-                      |  - parse ignore globs + custom instructions |
-                      |  - if file not found ~> silent no-op       |
-                      |  - if modified in PR ~> set rules_modified  |
-                      +----------------------+----------------------+
++---------------------------------------------+
+                       | Call: RepoSyncer.SyncRepo                   |
+                       |  - clone or fetch bare git repo             |
+                       |  - returns repo_path and head_sha           |
+                       +----------------------+----------------------+
+                                               |
+                                               v
+                       +---------------------------------------------+
+                       | Local merge of source into target            |
+                       |  - compute local merge commit via           |
+                       |    git merge-tree --write-tree              |
+                       |  - if conflicts ~> status=conflicts, exit   |
+                       |  - merge_sha used for file reader and       |
+                       |    search indexing                           |
+                       +----------------------+----------------------+
+                                               |
+                                               v
+                       +---------------------------------------------+
+                       | Read: .review-rules.yaml from bare clone     |
+                       |  - read file at merge result commit SHA     |
+                       |  - parse ignore globs + custom instructions |
+                       |  - if file not found ~> silent no-op       |
+                       |  - if modified in PR ~> set rules_modified  |
+                       +----------------------+----------------------+
                                               |
                                               v
                       +---------------------------------------------+
@@ -164,7 +174,7 @@ Submit new invocation:
 **Inputs:** PR diff (filtered by ignore rules), previous review comments, custom instructions (from DB + repo-level `.review-rules.yaml`), repo metadata
 **Tools available to LLM:**
   - Search-MCP — semantic search across the indexed codebase
-  - File reader — reads files at a pinned commit SHA via `git show <sha>:<path>` on the bare clone. The SHA comes from `FetchPRDetails` (target branch HEAD at review time). This eliminates race conditions with concurrent `SyncRepo` operations — the file reader always serves content consistent with the diff, regardless of subsequent fetches.
+  - File reader — reads files at a pinned commit SHA via `git show <sha>:<path>` on the bare clone. The SHA is the locally-computed **merge result commit** (merging source branch into target), not just target HEAD. This ensures the reader sees exactly what the repo will look like after the PR is merged, including any changes from the target branch that happened after the PR was opened.
 **Output:** structured review (summary + list of inline comments with file, line, message, and optional update action referencing a previous comment ID)
 **Dry-run mode:** When triggered via the Admin Console, the reviewer returns its output without posting comments. This allows admins to preview and tune review quality before enabling live reviews.
 **OpenRouter resilience:** Retries use exponential backoff with jitter, respecting OpenRouter rate-limit headers (`Retry-After`, `X-RateLimit-Reset`). Restate's built-in retry policy handles transient failures. If the model is unavailable after retries, the invocation fails and can be inspected/restarted via the Restate UI.
@@ -238,4 +248,5 @@ Developers can provide feedback on individual review comments to measure and imp
 - **5,000 line diff size limit** — prevents overwhelming LLM context
 - **Summary posted only on first review** — on re-reviews, the original summary stays as-is
 - **Idempotent comment posting via `provider_comment_id`** — comments stored in DB before posting; on retry, comments with a provider_comment_id are skipped
-- **File reader pins to target branch HEAD at review time** — ensures file content consistency with the diff
+- **Local merge before review** — computes a local merge commit using `git merge-tree --write-tree`, ensuring file reader and search see the exact post-merge state. Merge conflicts result in `status=conflicts` and skip the review.
+- **File reader pins to merge result commit** — ensures file content shows the post-merge state, combining PR changes with any target branch updates

@@ -75,9 +75,6 @@ PRs over 5,000 lines get a "too large" comment and nothing else. Many large PRs 
 ### Reviewer gets the full filtered diff in a single prompt
 For a 4,000-line diff (just under the limit), stuffing everything into one LLM call risks hitting context limits and degrading review quality. The design doesn't mention a chunking or multi-pass strategy for large-but-below-threshold diffs. Consider splitting by file or logical group and aggregating results.
 
-### Target branch HEAD vs. merge base for file reads
-The file reader pins to `target branch HEAD at review time`, but the diff is computed against the merge base. If the target branch advanced since the PR was opened, the reviewer might read file content that doesn't match the diff context. Using the merge-base commit for file reads (or the PR head commit for files in the diff) would be more consistent.
-
 ## Re-review
 
 ### LLM inconsistency with comment updates
@@ -116,6 +113,9 @@ What happens when a push event arrives for an already-open draft PR? The webhook
 
 ### 8. Collection cloning for non-primary branches doesn't scale
 The branch collection optimization clones the primary branch's Qdrant collection for non-primary target branches. If a repo has many active target branches (e.g., release branches), stale collections accumulate. No cleanup strategy is mentioned.
+
+### Qdrant collection cleanup for merged/closed PR branches
+Merge-result collections (named `<repo_id>_<source_branch>`) are created for every PR branch but never cleaned up. When PRs are merged or closed, these collections persist indefinitely. Consider adding a cleanup mechanism (e.g., triggered by PR close webhook, or periodic garbage collection based on collection access time).
 
 ### 9. Missing retry/circuit-breaker on provider API calls
 Retry logic is specified for OpenRouter but not for provider API calls (GitHub/GitLab). These APIs also have rate limits and can be flaky. The Go activities should have similar backoff and rate-limit-header awareness.

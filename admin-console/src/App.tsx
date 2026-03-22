@@ -6,6 +6,7 @@ import { Layout } from "@/components/Layout";
 import { HealthCheck } from "@/pages/HealthCheck";
 import { Login } from "@/pages/Login";
 import { Register } from "@/pages/Register";
+import { Providers } from "@/pages/Providers";
 
 export default function App() {
   return (
@@ -19,8 +20,9 @@ export default function App() {
 
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
-              <Route path="/" element={<Navigate to="/health" replace />} />
+              <Route path="/" element={<Navigate to="/providers" replace />} />
               <Route path="/health" element={<HealthCheck />} />
+              <Route path="/providers" element={<Providers />} />
             </Route>
           </Route>
         </Routes>

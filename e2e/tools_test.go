@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -497,8 +498,8 @@ func TestIndexerFailureGracefulDegradation(t *testing.T) {
 // TestSearchCodebaseReturnsIndexedContent verifies that search_codebase returns actual
 // content from the indexed repository via search-mcp + Qdrant, not just an error string.
 // Searches for "CalculateTotal" which is defined in src/util.go of the test repo.
-// NOTE: Sequential (no t.Parallel) to avoid search-mcp concurrency issues with streamable-http.
 func TestSearchCodebaseReturnsIndexedContent(t *testing.T) {
+	t.Parallel()
 	tc := NewTestContext(t)
 
 	tc.SetMR(&MRConfig{
@@ -916,5 +917,103 @@ func TestReadFileToolWorksWithSyncedRepo(t *testing.T) {
 	}
 	if len(run.Comments) == 0 {
 		t.Errorf("expected comments in completed review")
+	}
+}
+
+// TestConcurrentSearchMCP verifies that search-mcp handles concurrent MCP
+// sessions correctly. Previously, stateful session mode caused failures
+// under concurrent load.
+func TestConcurrentSearchMCP(t *testing.T) {
+	t.Parallel()
+
+	// Run multiple reviews in parallel, each triggering search_codebase
+	// All must complete successfully without search-mcp errors
+	const numConcurrent = 3
+	var wg sync.WaitGroup
+	errCh := make(chan error, numConcurrent)
+
+	for i := 0; i < numConcurrent; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			// Each goroutine gets its own t.T via t.Run
+			t.Run(fmt.Sprintf("concurrent_%d", idx), func(t *testing.T) {
+				tc := NewTestContext(t)
+
+				// Use fixture with content that will be indexed
+				tc.SetMRFromBranch(fixtures.SimpleChange, fmt.Sprintf("Concurrent search test %d", idx), "Testing concurrent search", "alice")
+
+				// Two-turn: first searches, second returns final result
+				var callCount atomic.Int32
+				tc.SetResponseFunc(func(reqBody []byte) (int, json.RawMessage) {
+					n := callCount.Add(1)
+					if n == 1 {
+						return 200, json.RawMessage(fmt.Sprintf(`{
+							"id": "chatcmpl-conc-%d-1",
+							"object": "chat.completion",
+							"model": "test-model",
+							"choices": [{
+								"index": 0,
+								"message": {
+									"role": "assistant",
+									"content": null,
+									"tool_calls": [{
+										"id": "call_conc_%d",
+										"type": "function",
+										"function": {
+											"name": "search_codebase",
+											"arguments": "{\"query\": \"CalculateTotal function\"}"
+										}
+									}]
+								},
+								"finish_reason": "tool_calls"
+							}],
+							"usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+						}`, idx, idx))
+					}
+					return 200, defaultLLMResponse
+				})
+
+				runID, err := tc.TriggerReview()
+				if err != nil {
+					errCh <- fmt.Errorf("concurrent %d: TriggerReview failed: %w", idx, err)
+					return
+				}
+
+				run := tc.PollReviewRun(runID,
+					apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED, 90*time.Second, 2*time.Second)
+
+				if run.Status != apiv1.ReviewStatus_REVIEW_STATUS_COMPLETED {
+					errCh <- fmt.Errorf("concurrent %d: expected COMPLETED, got %s", idx, run.Status)
+					return
+				}
+
+				if callCount.Load() != 2 {
+					errCh <- fmt.Errorf("concurrent %d: expected 2 LLM calls, got %d", idx, callCount.Load())
+					return
+				}
+
+				// Verify search results were not an error
+				reqs := tc.LLMRequests()
+				if len(reqs) >= 2 {
+					body := string(reqs[1].Body)
+					if strings.Contains(body, "search-mcp failed") || strings.Contains(body, "search-mcp timed out") {
+						errCh <- fmt.Errorf("concurrent %d: search_codebase returned error: %s", idx, body)
+						return
+					}
+				}
+
+				errCh <- nil
+			})
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Error(err)
+		}
 	}
 }

@@ -42,5 +42,5 @@ Two files:
 - `MODEL_DIMENSIONS` dict is duplicated in both `server.py` and `indexer/indexing.py` — keep them in sync
 - Embeddings via OpenRouter (`https://openrouter.ai/api/v1`), OpenAI-compatible API
 - Host port is 8081 (not 8080) to avoid conflict with Restate ingress
-- Transport is controlled by `MCP_TRANSPORT` env var: `stdio` (default) or `streamable-http` (Docker). In HTTP mode, `MCP_HOST` and `MCP_PORT` configure the listener.
+- Transport is controlled by `MCP_TRANSPORT` env var: `stdio` (default) or `streamable-http` (Docker). In HTTP mode, runs in **stateless** mode (`FASTMCP_STATELESS_HTTP=true`) — each request is independent with no session tracking. `MCP_HOST` and `MCP_PORT` configure the listener.
 - Search uses hybrid mode (dense + sparse vectors via `VectorStoreQueryMode.HYBRID`), so collections must be indexed with sparse vectors enabled (handled by the indexer's `enable_hybrid=True`)

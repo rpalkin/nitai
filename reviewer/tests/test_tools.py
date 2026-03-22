@@ -1,4 +1,5 @@
 """Unit tests for reviewer/tools.py"""
+import asyncio
 import json
 import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -248,6 +249,21 @@ class TestSearchMcp:
 
         assert isinstance(result, str)
         assert "Error" in result
+
+    async def test_concurrent_search_calls(self):
+        """Multiple concurrent search_mcp() calls should all succeed."""
+        content = [_make_text_content(json.dumps(_SEARCH_RESULTS))]
+        mock_client = _make_mock_client(call_tool_result=content)
+
+        with patch("reviewer.tools.Client", return_value=mock_client):
+            results = await asyncio.gather(
+                search_mcp("http://search-mcp:8080", "repo-1", "query 1"),
+                search_mcp("http://search-mcp:8080", "repo-2", "query 2"),
+                search_mcp("http://search-mcp:8080", "repo-3", "query 3"),
+            )
+
+        assert all(isinstance(r, list) for r in results)
+        assert all(len(r) == 2 for r in results)
 
 
 # ---------------------------------------------------------------------------

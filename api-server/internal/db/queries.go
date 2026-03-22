@@ -51,6 +51,7 @@ type ReviewRunRow struct {
 	Status              string
 	Summary             *string
 	RestateInvocationID *string
+	DryRun              bool
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
@@ -236,14 +237,14 @@ func SetReviewEnabled(ctx context.Context, pool *pgxpool.Pool, id string, enable
 }
 
 // CreateReviewRun inserts a new review run with status=pending and returns its ID.
-func CreateReviewRun(ctx context.Context, pool *pgxpool.Pool, repoID string, mrNumber int64) (string, error) {
+func CreateReviewRun(ctx context.Context, pool *pgxpool.Pool, repoID string, mrNumber int64, dryRun bool) (string, error) {
 	const q = `
-		INSERT INTO review_runs (repo_id, mr_number, status)
-		VALUES ($1, $2, 'pending')
+		INSERT INTO review_runs (repo_id, mr_number, status, dry_run)
+		VALUES ($1, $2, 'pending', $3)
 		RETURNING id`
 
 	var id string
-	if err := pool.QueryRow(ctx, q, repoID, mrNumber).Scan(&id); err != nil {
+	if err := pool.QueryRow(ctx, q, repoID, mrNumber, dryRun).Scan(&id); err != nil {
 		return "", fmt.Errorf("CreateReviewRun: %w", err)
 	}
 	return id, nil
@@ -252,13 +253,13 @@ func CreateReviewRun(ctx context.Context, pool *pgxpool.Pool, repoID string, mrN
 // GetReviewRun fetches a review run by ID.
 func GetReviewRun(ctx context.Context, pool *pgxpool.Pool, id string) (*ReviewRunRow, error) {
 	const q = `
-		SELECT id, repo_id, mr_number, status, summary, restate_invocation_id, created_at, updated_at
+		SELECT id, repo_id, mr_number, status, summary, restate_invocation_id, dry_run, created_at, updated_at
 		FROM review_runs
 		WHERE id = $1`
 
 	row := &ReviewRunRow{}
 	err := pool.QueryRow(ctx, q, id).Scan(
-		&row.ID, &row.RepoID, &row.MRNumber, &row.Status, &row.Summary, &row.RestateInvocationID, &row.CreatedAt, &row.UpdatedAt,
+		&row.ID, &row.RepoID, &row.MRNumber, &row.Status, &row.Summary, &row.RestateInvocationID, &row.DryRun, &row.CreatedAt, &row.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -311,14 +312,14 @@ func GetActiveInvocationID(ctx context.Context, pool *pgxpool.Pool, repoID strin
 }
 
 // CreateReviewRunWithInvocation inserts a review run with a Restate invocation ID and returns its ID.
-func CreateReviewRunWithInvocation(ctx context.Context, pool *pgxpool.Pool, repoID string, mrNumber int64, invocationID string) (string, error) {
+func CreateReviewRunWithInvocation(ctx context.Context, pool *pgxpool.Pool, repoID string, mrNumber int64, invocationID string, dryRun bool) (string, error) {
 	const q = `
-		INSERT INTO review_runs (repo_id, mr_number, status, restate_invocation_id)
-		VALUES ($1, $2, 'pending', $3)
+		INSERT INTO review_runs (repo_id, mr_number, status, restate_invocation_id, dry_run)
+		VALUES ($1, $2, 'pending', $3, $4)
 		RETURNING id`
 
 	var id string
-	if err := pool.QueryRow(ctx, q, repoID, mrNumber, invocationID).Scan(&id); err != nil {
+	if err := pool.QueryRow(ctx, q, repoID, mrNumber, invocationID, dryRun).Scan(&id); err != nil {
 		return "", fmt.Errorf("CreateReviewRunWithInvocation: %w", err)
 	}
 	return id, nil

@@ -45,7 +45,7 @@ func (s *stubWebhookStore) GetActiveInvocationID(_ context.Context, _ string, _ 
 	return s.activeInvocationID, s.activeInvocationErr
 }
 
-func (s *stubWebhookStore) CreateReviewRun(_ context.Context, _ string, _ int64) (string, error) {
+func (s *stubWebhookStore) CreateReviewRun(_ context.Context, _ string, _ int64, _ bool) (string, error) {
 	s.createRunCalled = true
 	return s.createdRunID, s.createRunErr
 }
@@ -54,7 +54,7 @@ func (s *stubWebhookStore) UpdateReviewRunInvocationID(_ context.Context, _, _ s
 	return nil
 }
 
-func (s *stubWebhookStore) CreateReviewRunWithInvocation(_ context.Context, _ string, _ int64, _ string) (string, error) {
+func (s *stubWebhookStore) CreateReviewRunWithInvocation(_ context.Context, _ string, _ int64, _ string, _ bool) (string, error) {
 	s.createRunCalled = true
 	return s.createdRunID, s.createRunErr
 }

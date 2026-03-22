@@ -57,7 +57,7 @@ func (h *ReviewHandler) TriggerReview(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("getting repo: %w", err))
 	}
 
-	runID, err := db.CreateReviewRun(ctx, h.pool, msg.RepoId, msg.MrNumber)
+	runID, err := db.CreateReviewRun(ctx, h.pool, msg.RepoId, msg.MrNumber, msg.DryRun)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("creating review run: %w", err))
 	}
@@ -68,6 +68,7 @@ func (h *ReviewHandler) TriggerReview(ctx context.Context, req *connect.Request[
 		RepoID:   msg.RepoId,
 		MRNumber: msg.MrNumber,
 		Force:    true,
+		DryRun:   msg.DryRun,
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("sending to restate: %w", err))
@@ -80,6 +81,7 @@ func (h *ReviewHandler) TriggerReview(ctx context.Context, req *connect.Request[
 	activitylog.Log(ctx, h.pool, orgID, &msg.RepoId, actorID, "review.triggered", map[string]any{
 		"review_run_id": runID,
 		"mr_number":     msg.MrNumber,
+		"dry_run":       msg.DryRun,
 	})
 
 	run, err := db.GetReviewRun(ctx, h.pool, runID)

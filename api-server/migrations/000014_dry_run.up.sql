@@ -1,0 +1,1 @@
+ALTER TABLE review_runs ADD COLUMN dry_run BOOLEAN NOT NULL DEFAULT false;

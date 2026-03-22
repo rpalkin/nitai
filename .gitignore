@@ -26,6 +26,9 @@ deploy/overlays/local/secret.env
 gen/go/**
 !gen/go/go.mod
 
+# Generated protobuf TypeScript code
+gen/ts/
+
 # PostgreSQL data volume
 pgdata/
 

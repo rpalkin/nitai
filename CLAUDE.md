@@ -56,7 +56,8 @@ Each component has its own `CLAUDE.md` with detailed architecture and commands:
 | [indexer](indexer/) | Python Restate service — indexes Git repos (bare clones) into Qdrant with tree-sitter chunking | [indexer/CLAUDE.md](indexer/CLAUDE.md) |
 | [search-mcp](search-mcp/) | Python FastMCP server — semantic code search over Qdrant | [search-mcp/CLAUDE.md](search-mcp/CLAUDE.md) |
 | [proto](proto/) | Protobuf API definitions (auth, provider, repo, review, instruction services) | — |
-| [gen](gen/) | Generated Go code from protobuf (shared module) | — |
+| [gen](gen/) | Generated code from protobuf — Go (`gen/go/`) and TypeScript (`gen/ts/`) | — |
+| [admin-console](admin-console/) | React/TS SPA — admin UI (Vite + TailwindCSS + ConnectRPC) | [admin-console/CLAUDE.md](admin-console/CLAUDE.md) |
 | [e2e](e2e/) | Go e2e test suite — full-stack tests with mock GitLab + LLM servers | [e2e/CLAUDE.md](e2e/CLAUDE.md) |
 
 ## Commands
@@ -173,6 +174,7 @@ Admin API ──→ API Server (:8090 host, ConnectRPC)
 | Worker | 9080 | (internal only) |
 | Reviewer | 9090 | (internal only) |
 | Indexer | 9091 | (internal only) |
+| Admin Console (dev) | 3000 | 3000 |
 
 ### Infrastructure
 

@@ -32,11 +32,13 @@ message ReviewRun {
   repeated ReviewComment comments = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
+  bool dry_run = 8;
 }
 
 message TriggerReviewRequest {
   string repo_id = 1;
   int64 mr_number = 2;
+  bool dry_run = 3;
 }
 
 message TriggerReviewResponse {

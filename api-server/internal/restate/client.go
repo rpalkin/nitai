@@ -31,6 +31,7 @@ type PRReviewRequest struct {
 	RepoID   string `json:"repo_id"`
 	MRNumber int64  `json:"mr_number"`
 	Force    bool   `json:"force"`
+	DryRun   bool   `json:"dry_run"`
 }
 
 // sendResponse is the JSON body returned by Restate's /send endpoint.

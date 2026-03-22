@@ -97,6 +97,7 @@ func reviewRunToProto(run db.ReviewRunRow, comments []db.ReviewCommentRow) *apiv
 		Comments:  protoComments,
 		CreatedAt: toTimestamp(run.CreatedAt),
 		UpdatedAt: toTimestamp(run.UpdatedAt),
+		DryRun:    run.DryRun,
 	}
 }
 

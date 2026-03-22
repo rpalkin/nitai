@@ -77,6 +77,7 @@ SQL files in `migrations/` managed by golang-migrate, embedded in the binary:
 - `000011_review_instructions` — creates `review_instructions` table (id, org_id, name, content, repo_filter UUID[], file_pattern_filter TEXT[], enabled, timestamps)
 - `000012_conflicts_status` — adds `conflicts` value to review_status enum
 - `000013_activity_logs` — creates `activity_logs` table (id, org_id, repo_id nullable, actor_id nullable, event_type, details JSONB, created_at) with indexes on (org_id, created_at), (org_id, event_type), (repo_id)
+- `000014_dry_run` — adds `dry_run BOOLEAN NOT NULL DEFAULT false` to review_runs
 
 ### HTTP Endpoints
 

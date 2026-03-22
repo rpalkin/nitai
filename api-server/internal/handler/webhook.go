@@ -23,9 +23,9 @@ type WebhookStore interface {
 	GetProvider(ctx context.Context, id string) (*db.ProviderRow, error)
 	GetRepoByRemoteID(ctx context.Context, providerID, remoteID string) (*db.RepoRow, error)
 	GetActiveInvocationID(ctx context.Context, repoID string, mrNumber int64) (*string, error)
-	CreateReviewRun(ctx context.Context, repoID string, mrNumber int64) (string, error)
+	CreateReviewRun(ctx context.Context, repoID string, mrNumber int64, dryRun bool) (string, error)
 	UpdateReviewRunInvocationID(ctx context.Context, runID, invocationID string) error
-	CreateReviewRunWithInvocation(ctx context.Context, repoID string, mrNumber int64, invocationID string) (string, error)
+	CreateReviewRunWithInvocation(ctx context.Context, repoID string, mrNumber int64, invocationID string, dryRun bool) (string, error)
 	CreateDraftReviewRun(ctx context.Context, repoID string, mrNumber int64) (string, error)
 	TransitionDraftToReview(ctx context.Context, repoID string, mrNumber int64) error
 }
@@ -57,8 +57,8 @@ func (s *PoolWebhookStore) GetActiveInvocationID(ctx context.Context, repoID str
 }
 
 // CreateReviewRun implements WebhookStore.
-func (s *PoolWebhookStore) CreateReviewRun(ctx context.Context, repoID string, mrNumber int64) (string, error) {
-	return db.CreateReviewRun(ctx, s.Pool, repoID, mrNumber)
+func (s *PoolWebhookStore) CreateReviewRun(ctx context.Context, repoID string, mrNumber int64, dryRun bool) (string, error) {
+	return db.CreateReviewRun(ctx, s.Pool, repoID, mrNumber, dryRun)
 }
 
 // UpdateReviewRunInvocationID implements WebhookStore.
@@ -67,8 +67,8 @@ func (s *PoolWebhookStore) UpdateReviewRunInvocationID(ctx context.Context, runI
 }
 
 // CreateReviewRunWithInvocation implements WebhookStore.
-func (s *PoolWebhookStore) CreateReviewRunWithInvocation(ctx context.Context, repoID string, mrNumber int64, invocationID string) (string, error) {
-	return db.CreateReviewRunWithInvocation(ctx, s.Pool, repoID, mrNumber, invocationID)
+func (s *PoolWebhookStore) CreateReviewRunWithInvocation(ctx context.Context, repoID string, mrNumber int64, invocationID string, dryRun bool) (string, error) {
+	return db.CreateReviewRunWithInvocation(ctx, s.Pool, repoID, mrNumber, invocationID, dryRun)
 }
 
 // CreateDraftReviewRun implements WebhookStore.
@@ -260,7 +260,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create review run record first (without invocation ID - will be updated after dispatch).
-	runID, err := h.store.CreateReviewRun(ctx, repo.ID, mrIID)
+	runID, err := h.store.CreateReviewRun(ctx, repo.ID, mrIID, false)
 	if err != nil {
 		log.Printf("webhook: CreateReviewRun: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -274,6 +274,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RunID:    runID,
 		RepoID:   repo.ID,
 		MRNumber: mrIID,
+		DryRun:   false,
 	})
 	if err != nil {
 		log.Printf("webhook: SendPRReview: %v", err)

@@ -126,9 +126,6 @@ Collections are named by `<repo-id>-<branch>`. There's no org-scoped namespace o
 ### Local disk for repo clones has no capacity management
 Repos accumulate on local disk with no eviction strategy. A customer with 200 repos, each multi-GB, will eventually fill the disk. Consider LRU eviction for repos that haven't been reviewed recently, or at minimum a disk usage alert.
 
-### Search-MCP as a subprocess per review is expensive — *phase2 planned* (persistent HTTP container)
-The Reviewer spawns Search-MCP as a stdio subprocess for every review. Each subprocess initializes a Qdrant client connection. For high-throughput installations, this is wasteful. Consider running Search-MCP as a persistent sidecar or using direct Qdrant client calls from the Reviewer.
-
 ## Missing Functionality
 
 ### 10. No comment resolution/outdated handling

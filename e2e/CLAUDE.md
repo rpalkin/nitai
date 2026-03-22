@@ -264,7 +264,7 @@ Each test case should:
 - `llm.Reset()` clears both requests and `ResponseFunc`. Always set `ResponseFunc` **after** the initial `llm.Reset()` call in test setup.
 - Test 9 (`TestDuplicateDiffDedup`) completes in ~2s. The debounce timer only fires for cancelled invocations; after a normal completion it is skipped.
 
-## Current test cases (44 tests)
+## Current test cases (45 tests)
 
 | Test | Description |
 |---|---|
@@ -312,5 +312,6 @@ Each test case should:
 | `TestRealGitPipelineIntegrity` | Acceptance test: verifies real git SHAs in discussion positions and real diff content in LLM requests. |
 | `TestActivityLogLifecycle` | Activity log lifecycle: creates provider/repo/review, lists logs with filters and pagination. |
 | `TestDryRunReview` | Dry-run review runs full pipeline, stores results in DB, but posts zero notes/discussions to provider. |
+| `TestConcurrentSearchMCP` | 3 concurrent reviews all triggering `search_codebase` — verifies stateless HTTP mode handles parallel MCP sessions. |
 
 **Note:** Tests C and I (`TestCancelOnNewPush`, `TestDebounceRapidPushes`) trigger the debounce (configured via `DEBOUNCE_TIMEOUT=5s` in e2e). They complete in seconds instead of minutes. With parallel execution, the full suite completes in ~5-8 minutes (previously ~30-50 minutes). The suite timeout is 600s.

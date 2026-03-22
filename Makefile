@@ -72,3 +72,12 @@ e2e: init vendor
 unit: init vendor
 	cd go-services && go test ./...
 	cd api-server && go test ./...
+
+admin-console-setup:
+	cd admin-console && npm install
+
+admin-console-dev:
+	cd admin-console && npm run dev
+
+admin-console-build:
+	cd admin-console && npm run build

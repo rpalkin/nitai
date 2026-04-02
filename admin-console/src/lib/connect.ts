@@ -1,5 +1,5 @@
-import { createConnectTransport, type Interceptor } from "@connectrpc/connect-web";
-import { createClient } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-web";
+import { createClient, type Interceptor } from "@connectrpc/connect";
 import { AuthService } from "@gen/api/v1/auth_pb";
 import { ProviderService } from "@gen/api/v1/provider_pb";
 import { RepoService } from "@gen/api/v1/repo_pb";

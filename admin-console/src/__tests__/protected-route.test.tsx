@@ -34,11 +34,7 @@ function renderProtectedRoute(initialEntries: string[] = ["/protected"], token: 
         <Routes>
           <Route path="/login" element={<TestLoginPage />} />
           <Route
-            element={
-              <ProtectedRoute>
-                <TestProtectedPage />
-              </ProtectedRoute>
-            }
+            element={<ProtectedRoute />}
           >
             <Route path="/protected" element={<TestProtectedPage />} />
           </Route>
@@ -60,7 +56,7 @@ describe("ProtectedRoute", () => {
 
   it("allows authenticated user to access protected route", async () => {
     const mockUser = { id: "1", orgId: "org1", email: "test@example.com" } as User;
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
 
     renderProtectedRoute(["/protected"], "valid-token");
 

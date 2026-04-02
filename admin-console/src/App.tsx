@@ -7,6 +7,8 @@ import { HealthCheck } from "@/pages/HealthCheck";
 import { Login } from "@/pages/Login";
 import { Register } from "@/pages/Register";
 import { Providers } from "@/pages/Providers";
+import { Provider } from "@/pages/Provider";
+import { Repos } from "@/pages/Repos";
 
 export default function App() {
   return (
@@ -23,6 +25,8 @@ export default function App() {
               <Route path="/" element={<Navigate to="/providers" replace />} />
               <Route path="/health" element={<HealthCheck />} />
               <Route path="/providers" element={<Providers />} />
+              <Route path="/providers/:providerId" element={<Provider />} />
+              <Route path="/providers/:providerId/repos" element={<Repos />} />
             </Route>
           </Route>
         </Routes>

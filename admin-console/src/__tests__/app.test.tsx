@@ -43,7 +43,7 @@ describe("App", () => {
   });
 
   it("renders the app shell with navigation when authenticated", async () => {
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
     localStorage.setItem("auth_token", "test-token");
 
     renderWithAuth(
@@ -61,7 +61,7 @@ describe("App", () => {
   });
 
   it("renders the health check page when authenticated", async () => {
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
     localStorage.setItem("auth_token", "test-token");
 
     renderWithAuth(

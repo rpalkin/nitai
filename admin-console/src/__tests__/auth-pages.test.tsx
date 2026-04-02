@@ -52,7 +52,7 @@ describe("Login page", () => {
     vi.mocked(authClient.login).mockResolvedValue({
       token: "test-token",
       user: mockUser,
-    });
+    } as any);
 
     renderWithRouter(<Login />);
 
@@ -86,8 +86,8 @@ describe("Login page", () => {
     vi.mocked(authClient.login).mockResolvedValue({
       token: "test-token",
       user: mockUser,
-    });
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    } as any);
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
 
     render(
       <MemoryRouter initialEntries={["/login"]}>
@@ -154,7 +154,7 @@ describe("Register page", () => {
     vi.mocked(authClient.register).mockResolvedValue({
       token: "new-token",
       user: mockUser,
-    });
+    } as any);
 
     renderWithRouter(<Register />);
 
@@ -175,8 +175,8 @@ describe("Register page", () => {
     vi.mocked(authClient.register).mockResolvedValue({
       token: "new-token",
       user: mockUser,
-    });
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    } as any);
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
 
     render(
       <MemoryRouter initialEntries={["/register"]}>

@@ -53,7 +53,7 @@ describe("Providers page", () => {
     it("renders provider list with names in table", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: mockProviders,
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -66,7 +66,7 @@ describe("Providers page", () => {
     it("shows empty state when no providers", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: [],
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -104,7 +104,7 @@ describe("Providers page", () => {
     it("shows form fields when Add provider is clicked", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: [],
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -123,7 +123,7 @@ describe("Providers page", () => {
     it("shows base url field for self-hosted gitlab", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: [],
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -142,11 +142,11 @@ describe("Providers page", () => {
     it("submits createProvider with correct args", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: [],
-      });
+      } as any);
       vi.mocked(providerClient.createProvider).mockResolvedValue({
         provider: { id: "new-id", type: ProviderType.GITLAB_CLOUD, name: "GitLab Cloud" } as Provider,
         webhookSecret: "secret-123",
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -178,11 +178,11 @@ describe("Providers page", () => {
     it("shows webhook secret after creation", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: [],
-      });
+      } as any);
       vi.mocked(providerClient.createProvider).mockResolvedValue({
         provider: { id: "new-id", type: ProviderType.GITLAB_CLOUD, name: "GitLab Cloud" } as Provider,
         webhookSecret: "secret-123",
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -206,11 +206,11 @@ describe("Providers page", () => {
     it("dismisses webhook secret banner", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: [],
-      });
+      } as any);
       vi.mocked(providerClient.createProvider).mockResolvedValue({
         provider: { id: "new-id", type: ProviderType.GITLAB_CLOUD, name: "GitLab Cloud" } as Provider,
         webhookSecret: "secret-123",
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -241,8 +241,8 @@ describe("Providers page", () => {
     it("shows confirmation dialog and calls deleteProvider", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: mockProviders,
-      });
-      vi.mocked(providerClient.deleteProvider).mockResolvedValue({});
+      } as any);
+      vi.mocked(providerClient.deleteProvider).mockResolvedValue({} as any);
 
       renderWithRouter(<Providers />);
 
@@ -266,7 +266,7 @@ describe("Providers page", () => {
     it("cancels delete without calling deleteProvider", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: mockProviders,
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -292,11 +292,11 @@ describe("Providers page", () => {
     it("refreshes list after create", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: [],
-      });
+      } as any);
       vi.mocked(providerClient.createProvider).mockResolvedValue({
         provider: { id: "new-id", type: ProviderType.GITLAB_CLOUD, name: "GitLab Cloud" } as Provider,
         webhookSecret: "secret-123",
-      });
+      } as any);
 
       renderWithRouter(<Providers />);
 
@@ -319,8 +319,8 @@ describe("Providers page", () => {
     it("refreshes list after delete", async () => {
       vi.mocked(providerClient.listProviders).mockResolvedValue({
         providers: mockProviders,
-      });
-      vi.mocked(providerClient.deleteProvider).mockResolvedValue({});
+      } as any);
+      vi.mocked(providerClient.deleteProvider).mockResolvedValue({} as any);
 
       renderWithRouter(<Providers />);
 

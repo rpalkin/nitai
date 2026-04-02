@@ -31,6 +31,8 @@ React/TypeScript SPA for AI Reviewer admin operations.
   - `Register.tsx` — registration form with password strength indicator
   - `HealthCheck.tsx` — health check page (protected)
   - `Providers.tsx` — provider management page (list, create, delete, webhook secret display)
+  - `Provider.tsx` — provider details page (provider info + repos list with toggle)
+  - `Repos.tsx` — repository management page (list per provider, toggle review_enabled)
 - `src/App.tsx` — router and app shell with AuthProvider wrapper
 - `src/index.css` — Tailwind v4 theme with custom colors (surface-*, accent, text-*)
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { providerClient } from "@/lib/connect";
 import { ConnectError } from "@connectrpc/connect";
 import type { Provider } from "@gen/api/v1/provider_pb";
@@ -311,7 +312,13 @@ export function Providers() {
                   <td className="px-4 py-3 text-text-muted text-sm">
                     {formatDate(provider.createdAt)}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right space-x-3">
+                    <Link
+                      to={`/providers/${provider.id}/repos`}
+                      className="text-accent hover:text-accent-hover transition-colors text-sm"
+                    >
+                      Repos
+                    </Link>
                     <button
                       onClick={() => setDeletingId(provider.id)}
                       aria-label={`Delete ${provider.name}`}

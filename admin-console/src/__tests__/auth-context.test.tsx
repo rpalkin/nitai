@@ -60,8 +60,8 @@ describe("AuthContext", () => {
     vi.mocked(authClient.login).mockResolvedValue({
       token: "test-token",
       user: mockUser,
-    });
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    } as any);
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
 
     renderWithProvider(<TestConsumer />);
     await userEvent.click(screen.getByText("Login"));
@@ -78,8 +78,8 @@ describe("AuthContext", () => {
     vi.mocked(authClient.register).mockResolvedValue({
       token: "new-token",
       user: mockUser,
-    });
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    } as any);
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
 
     renderWithProvider(<TestConsumer />);
     await userEvent.click(screen.getByText("Register"));
@@ -96,8 +96,8 @@ describe("AuthContext", () => {
     vi.mocked(authClient.login).mockResolvedValue({
       token: "test-token",
       user: mockUser,
-    });
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    } as any);
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
 
     renderWithProvider(<TestConsumer />);
     await userEvent.click(screen.getByText("Login"));
@@ -122,7 +122,7 @@ describe("AuthContext", () => {
 
   it("reads token from localStorage and calls getMe on mount", async () => {
     const mockUser = { id: "1", orgId: "org1", email: "stored@example.com" } as User;
-    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser });
+    vi.mocked(authClient.getMe).mockResolvedValue({ user: mockUser } as any);
 
     localStorage.setItem(TOKEN_KEY, "stored-token");
 

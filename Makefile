@@ -29,7 +29,7 @@ vendor: proto
 	cd go-services && GOWORK=off go mod vendor
 	cd e2e && GOWORK=off go mod vendor
 
-up: vendor
+up: init vendor
 	docker compose up -d --build
 
 down:

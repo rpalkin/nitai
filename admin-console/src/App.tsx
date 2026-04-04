@@ -9,6 +9,7 @@ import { Register } from "@/pages/Register";
 import { Providers } from "@/pages/Providers";
 import { Provider } from "@/pages/Provider";
 import { Repos } from "@/pages/Repos";
+import { Instructions } from "@/pages/Instructions";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
               <Route path="/providers" element={<Providers />} />
               <Route path="/providers/:providerId" element={<Provider />} />
               <Route path="/providers/:providerId/repos" element={<Repos />} />
+              <Route path="/instructions" element={<Instructions />} />
             </Route>
           </Route>
         </Routes>

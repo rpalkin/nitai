@@ -10,6 +10,7 @@ import { Providers } from "@/pages/Providers";
 import { Provider } from "@/pages/Provider";
 import { Repos } from "@/pages/Repos";
 import { Instructions } from "@/pages/Instructions";
+import { ActivityLog } from "@/pages/ActivityLog";
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
               <Route path="/providers/:providerId" element={<Provider />} />
               <Route path="/providers/:providerId/repos" element={<Repos />} />
               <Route path="/instructions" element={<Instructions />} />
+              <Route path="/activity" element={<ActivityLog />} />
             </Route>
           </Route>
         </Routes>
